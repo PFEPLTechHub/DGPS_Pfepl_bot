@@ -24,7 +24,7 @@ MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
 MYSQL_DB   = os.getenv("MYSQL_DB", "tg_staffbot")
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASS = os.getenv("MYSQL_PASS", "")
-INVITE_DAYS_VALID = int(os.getenv("INVITE_DAYS_VALID", "7"))
+INVITE_DAYS_VALID = int(os.getenv("INVITE_DAYS_VALID", "1"))
 
 # ----------------- DB Pool -----------------
 dbconfig = {
@@ -199,27 +199,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["onboard_user_id"] = user_id
         context.user_data["approval_id"] = approval_id
 
-        await update.message.reply_text("👋 Welcome! Let’s set up your profile.\n\nWhat is your *first name*?",
+        await update.message.reply_text("👋 Welcome! Let's set up your profile.\n\nWhat is your *first name*?",
                                         parse_mode="Markdown")
         return ASK_FIRST
 
-    # No token → just a normal start
-    await update.message.reply_text(
-        "Hi! Use /whoami to see your role. Managers can use /manage to invite & approve users."
-    )
-
-async def whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    u = get_user_by_tg(update.effective_user.id)
-    if not u:
-        await update.message.reply_text("No record found. Use /start again.")
-        return
-    r = "Manager" if u["role"] == ROLE_MANAGER else "Employee"
-    await update.message.reply_text(
-        f"Your role: {r}\n"
-        f"Active: {'Yes' if u['is_active']==1 else 'No'}\n"
-        f"Manager ID: {u['manager_id'] or '-'}\n"
-        f"DB User ID: {u['id']}"
-    )
 
 # -------- Onboarding (collect profile) --------
 async def ask_first(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -375,7 +358,6 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # -------- Utility: help and cancel --------
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "/whoami – show your role\n"
         "/manage – manager panel (invite/show/pending)\n"
         "Managers share invite links; new users fill profile; manager approves."
     )
@@ -391,7 +373,6 @@ def main():
 
     # Start & whoami & manage
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("whoami", whoami))
     app.add_handler(CommandHandler("manage", manage))
     app.add_handler(CommandHandler("help", help_cmd))
 
