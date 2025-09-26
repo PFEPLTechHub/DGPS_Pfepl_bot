@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Daily Drone Report</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; background: #f7f7f8; }
+    h2 { margin: 0 0 12px; }
+    .card { background: #fff; border-radius: 10px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
+    label { display: block; font-weight: 600; margin-top: 10px; }
+    input, select, textarea { width: 100%; padding: 8px; margin-top: 6px; border: 1px solid #ddd; border-radius: 8px; }
+    button { padding: 10px 14px; border: 0; border-radius: 8px; background: #2a7ade; color: #fff; font-weight: 600; cursor: pointer; }
+    button.link { background: #666; }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .muted { color: #666; font-size: 12px; }
+    .flight { border: 1px dashed #cfd8dc; padding: 10px; border-radius: 8px; margin-top: 8px; }
+    .totals { background: #eef6ff; padding: 10px; border-radius: 8px; }
+    .flex { display: flex; gap: 8px; align-items: center; }
+    .right { margin-left: auto; }
+  </style>
+</head>
+<body>
+  <h2>Daily Drone Report</h2>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label for="report_date">Date</label>
+        <input type="date" id="report_date" />
+      </div>
+      <div>
+        <label for="base_height_m">Base Height (m)</label>
+        <input type="number" id="base_height_m" min="0" step="0.01" />
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="site_id">Site</label>
+        <select id="site_id"></select>
+      </div>
+      <div>
+        <label for="drone_id">Drone</label>
+        <select id="drone_id"></select>
+      </div>
+    </div>
+
+    <div class="row">
+      <div>
+        <label for="pilot_name">Pilot</label>
+        <input type="text" id="pilot_name" placeholder="Pilot Name" />
+      </div>
+      <div>
+        <label for="copilot_name">Copilot</label>
+        <input type="text" id="copilot_name" placeholder="Copilot Name" />
+      </div>
+    </div>
+
+    <label for="dgps_used">DGPS Used (comma-separated)</label>
+    <input type="text" id="dgps_used" placeholder="R4S - 314, DA2 - 739" />
+
+    <label for="dgps_ops">DGPS Operators (comma-separated)</label>
+    <input type="text" id="dgps_ops" placeholder="Alice, Bob" />
+
+    <label for="grid_numbers">Grid Numbers / Block (comma-separated)</label>
+    <input type="text" id="grid_numbers" placeholder="H43R12A17, H43R12A22" />
+
+    <label for="gcp_points">GCP Points Covered (comma-separated)</label>
+    <input type="text" id="gcp_points" placeholder="CP1, CP2, CK1, CK2" />
+
+    <label for="remark">Remark</label>
+    <textarea id="remark" rows="3" placeholder="Short remark"></textarea>
+  </div>
+
+  <div class="card">
+    <div class="flex">
+      <h3 style="margin:0">Flights</h3>
+      <button class="right" id="btn_add_flight">+ Add Flight</button>
+    </div>
+    <div id="flights"></div>
+
+    <div class="totals" style="margin-top:10px;">
+      <div class="row">
+        <div>
+          <label>Total Flight Time (min)</label>
+          <input type="number" id="total_time" readonly />
+        </div>
+        <div>
+          <label>Total Area (sq km)</label>
+          <input type="number" id="total_area" readonly />
+        </div>
+      </div>
+      <div class="muted">Totals are for your reference; server does not store totals and will compute when needed.</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="flex">
+      <button id="btn_submit">Submit Report</button>
+      <button class="link right" id="btn_close">Close</button>
+    </div>
+  </div>
+
+  <script>
+    const tg = window.Telegram?.WebApp;
+    tg?.expand();
+
+    async function loadMasters() {
+      const res = await fetch('/api/masters');
+      const data = await res.json();
+      if (!data.ok) { alert('Failed to load masters'); return; }
+
+      fillSelect(document.getElementById('site_id'), data.sites);
+      fillSelect(document.getElementById('drone_id'), data.drones);
+    }
+
+    function fillSelect(sel, items) {
+      sel.innerHTML = '';
+      const opt0 = document.createElement('option');
+      opt0.value = '';
+      opt0.textContent = '-- Select --';
+      sel.appendChild(opt0);
+      (items || []).forEach(i => {
+        const o = document.createElement('option');
+        o.value = i.id;
+        o.textContent = i.name;
+        sel.appendChild(o);
+      });
+    }
+
+    function addFlightRow() {
+      const wrap = document.getElementById('flights');
+      const div = document.createElement('div');
+      div.className = 'flight';
+      div.innerHTML = `
+        <div class="row">
+          <div>
+            <label>Flight Time (min)</label>
+            <input type="number" class="f_time" min="0" step="1" />
+          </div>
+          <div>
+            <label>Area (sq km)</label>
+            <input type="number" class="f_area" min="0" step="0.001" />
+          </div>
+        </div>
+        <label>UAV Rover File (UBX No)</label>
+        <input type="text" class="f_ubx" placeholder="UBX..." />
+        <label>Drone Base File No</label>
+        <input type="text" class="f_base" placeholder="Base file..." />
+        <div class="flex" style="margin-top:8px;">
+          <span class="muted">Flight</span>
+          <button class="link right" onclick="this.closest('.flight').remove(); recomputeTotals();">Remove</button>
+        </div>
+      `;
+      wrap.appendChild(div);
+    }
+
+    function parseCommaList(val) {
+      return (val || '')
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean);
+    }
+
+    function recomputeTotals() {
+      let t = 0, a = 0;
+      document.querySelectorAll('.f_time').forEach(el => { t += Number(el.value || 0); });
+      document.querySelectorAll('.f_area').forEach(el => { a += Number(el.value || 0); });
+      document.getElementById('total_time').value = t;
+      document.getElementById('total_area').value = a.toFixed(3);
+    }
+
+    document.getElementById('btn_add_flight').addEventListener('click', () => {
+      addFlightRow();
+    });
+
+    document.getElementById('flights').addEventListener('input', (e) => {
+      if (e.target.classList.contains('f_time') || e.target.classList.contains('f_area')) {
+        recomputeTotals();
+      }
+    });
+
+    document.getElementById('btn_close').addEventListener('click', () => {
+      tg?.close();
+    });
+
+    document.getElementById('btn_submit').addEventListener('click', async () => {
+      try {
+        const initData = tg?.initData || '';
+        const body = collectForm();
+        const res = await fetch('/api/reports', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ init_data: initData, report: body })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.ok) {
+          throw new Error(data.detail || JSON.stringify(data));
+        }
+        alert('Report submitted. ID: ' + data.report_id);
+        tg?.close();
+      } catch (err) {
+        alert('Submit failed: ' + err.message);
+      }
+    });
+
+    function collectForm() {
+      const flights = [];
+      document.querySelectorAll('.flight').forEach(div => {
+        flights.push({
+          flight_time_min: Number(div.querySelector('.f_time').value || 0),
+          area_sq_km: Number(div.querySelector('.f_area').value || 0),
+          uav_rover_file: div.querySelector('.f_ubx').value.trim(),
+          drone_base_file_no: div.querySelector('.f_base').value.trim()
+        });
+      });
+
+      return {
+        report_date: document.getElementById('report_date').value,
+        site_id: Number(document.getElementById('site_id').value),
+        drone_id: Number(document.getElementById('drone_id').value),
+        base_height_m: Number(document.getElementById('base_height_m').value),
+        pilot_name: document.getElementById('pilot_name').value.trim(),
+        copilot_name: document.getElementById('copilot_name').value.trim(),
+        dgps_used: parseCommaList(document.getElementById('dgps_used').value),
+        dgps_operators: parseCommaList(document.getElementById('dgps_ops').value),
+        grid_numbers: parseCommaList(document.getElementById('grid_numbers').value),
+        gcp_points: parseCommaList(document.getElementById('gcp_points').value),
+        remark: document.getElementById('remark').value.trim(),
+        flights
+      };
+    }
+
+    // defaults
+    document.getElementById('report_date').value = new Date().toISOString().slice(0,10);
+    addFlightRow();
+    loadMasters();
+  </script>
+</body>
+</html>
