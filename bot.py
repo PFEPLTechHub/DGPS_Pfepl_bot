@@ -1,19 +1,35 @@
+# bot.py
 import os
+import re
 import uuid
-from datetime import datetime, timedelta
+import logging
+from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-
-import mysql.connector
 from mysql.connector import pooling
 
 from telegram import (
-    Update, InlineKeyboardMarkup, InlineKeyboardButton
+    Update,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
 )
 from telegram.ext import (
-    ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler,
-    ConversationHandler, ContextTypes, filters
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ConversationHandler,
+    ContextTypes,
+    filters,
 )
+
+# ----------------- Logging -----------------
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logging.basicConfig(
+    level=getattr(logging, LOG_LEVEL, logging.INFO),
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("staffbot")
 
 # ----------------- Load config -----------------
 load_dotenv()
@@ -21,16 +37,23 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")  # without '@'
 MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_DB   = os.getenv("MYSQL_DB", "tg_staffbot")
+MYSQL_DB = os.getenv("MYSQL_DB", "tg_staffbot")
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASS = os.getenv("MYSQL_PASS", "")
-INVITE_DAYS_VALID = int(os.getenv("INVITE_DAYS_VALID", "1"))
+INVITE_DAYS_VALID = int(os.getenv("INVITE_DAYS_VALID", "1"))  # invitation lifetime (days)
+
+# Timezones
+UTC = timezone.utc
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # ----------------- DB Pool -----------------
 dbconfig = {
-    "host": MYSQL_HOST, "port": MYSQL_PORT,
-    "database": MYSQL_DB, "user": MYSQL_USER, "password": MYSQL_PASS,
-    "autocommit": True
+    "host": MYSQL_HOST,
+    "port": MYSQL_PORT,
+    "database": MYSQL_DB,
+    "user": MYSQL_USER,
+    "password": MYSQL_PASS,
+    "autocommit": True,
 }
 cnxpool = pooling.MySQLConnectionPool(pool_name="staffpool", pool_size=5, **dbconfig)
 
@@ -40,11 +63,12 @@ def db_conn():
 # ----------------- Constants -----------------
 ROLE_MANAGER = 1
 ROLE_EMPLOYEE = 2
+APPROVAL_WINDOW_HOURS = 24
 
-# Conversation states for onboarding
+# Conversation states (post-approval profile)
 ASK_FIRST, ASK_LAST, ASK_PHONE = range(3)
 
-# ----------------- Helpers -----------------
+# ----------------- DB helpers -----------------
 def get_user_by_tg(telegram_id):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute("SELECT * FROM users WHERE telegram_id=%s", (telegram_id,))
@@ -55,33 +79,32 @@ def get_user_by_id(user_id):
         cur.execute("SELECT * FROM users WHERE id=%s", (user_id,))
         return cur.fetchone()
 
-def ensure_user_record(telegram_id, username=None):
-    """Create a bare record if not exists (used for managers too)."""
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute("SELECT id FROM users WHERE telegram_id=%s", (telegram_id,))
-        row = cur.fetchone()
-        if row:
-            return row[0]
-        cur.execute(
-            "INSERT INTO users (telegram_id, username, role, is_active) VALUES (%s,%s,%s,%s)",
-            (telegram_id, username, ROLE_EMPLOYEE, 0)
-        )
-        return cur.lastrowid
+def user_active_by_tg(telegram_id):
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute("SELECT * FROM users WHERE telegram_id=%s AND is_active=1", (telegram_id,))
+        return cur.fetchone()
 
 def is_manager(telegram_id):
     u = get_user_by_tg(telegram_id)
     return bool(u and u["role"] == ROLE_MANAGER and u["is_active"] == 1)
 
+def get_manager_record(telegram_id):
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute("SELECT * FROM users WHERE telegram_id=%s AND role=%s", (telegram_id, ROLE_MANAGER))
+        return cur.fetchone()
+
 def create_invitation(manager_id, invite_role=ROLE_EMPLOYEE):
     token = str(uuid.uuid4())
-    expires_at = datetime.utcnow() + timedelta(days=INVITE_DAYS_VALID)
+    expires_at_utc = datetime.now(UTC) + timedelta(days=INVITE_DAYS_VALID)
+    expires_at_db = expires_at_utc.replace(tzinfo=None)
     with db_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO invitations (token, manager_id, invite_role, expires_at, status) "
             "VALUES (%s,%s,%s,%s,'pending')",
-            (token, manager_id, invite_role, expires_at)
+            (token, manager_id, invite_role, expires_at_db),
         )
-    return token, expires_at
+    logger.info("Invitation created | token=%s manager_id=%s expires_at_utc=%s", token, manager_id, expires_at_utc)
+    return token, expires_at_utc
 
 def get_invitation(token):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
@@ -92,224 +115,474 @@ def mark_invitation_used(inv_id, user_id):
     with db_conn() as conn, conn.cursor() as cur:
         cur.execute(
             "UPDATE invitations SET status='used', used_at=UTC_TIMESTAMP(), redeemed_by_user_id=%s WHERE id=%s",
-            (user_id, inv_id)
+            (user_id, inv_id),
         )
+    logger.info("Invitation marked used | invitation_id=%s user_id=%s", inv_id, user_id)
 
-def create_approval(invited_user_id, manager_id):
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO approvals (invited_user_id, manager_id, status) VALUES (%s,%s,'pending')",
-            (invited_user_id, manager_id)
-        )
-        return cur.lastrowid
-
-def set_user_profile(user_id, first_name, last_name, phone):
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE users SET first_name=%s, last_name=%s, phone=%s WHERE id=%s",
-            (first_name, last_name, phone, user_id)
-        )
-
-def activate_user(user_id, manager_id):
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE users SET is_active=1, manager_id=%s WHERE id=%s",
-            (manager_id, user_id)
-        )
-
-def update_approval(approval_id, status, decided_by):
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE approvals SET status=%s, decided_at=UTC_TIMESTAMP(), decided_by=%s WHERE id=%s",
-            (status, decided_by, approval_id)
-        )
-
-def get_pending_approvals(manager_id, limit=10):
+# ---- join_requests ----
+def find_pending_request(telegram_id, invitation_id):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
-            "SELECT a.id AS approval_id, u.* "
-            "FROM approvals a JOIN users u ON a.invited_user_id=u.id "
-            "WHERE a.manager_id=%s AND a.status='pending' "
-            "ORDER BY a.created_at ASC LIMIT %s",
-            (manager_id, limit)
+            "SELECT * FROM join_requests WHERE telegram_id=%s AND invitation_id=%s AND status='pending' "
+            "ORDER BY id DESC LIMIT 1",
+            (telegram_id, invitation_id),
+        )
+        return cur.fetchone()
+
+def create_join_request_min(telegram_id, username, manager_id, invite_role, invitation_id):
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO join_requests "
+            "(telegram_id, username, manager_id, invite_role, invitation_id, status) "
+            "VALUES (%s,%s,%s,%s,%s,'pending')",
+            (telegram_id, username, manager_id, invite_role, invitation_id),
+        )
+        jr_id = cur.lastrowid
+    logger.info(
+        "Join request created | jr_id=%s tg=%s manager_id=%s invitation_id=%s",
+        jr_id, telegram_id, manager_id, invitation_id
+    )
+    return jr_id
+
+def get_join_request(jr_id):
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute("SELECT * FROM join_requests WHERE id=%s", (jr_id,))
+        return cur.fetchone()
+
+def get_pending_join_requests(manager_id, limit=25):
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute(
+            "SELECT * FROM join_requests WHERE manager_id=%s AND status='pending' "
+            "ORDER BY created_at ASC LIMIT %s",
+            (manager_id, limit),
         )
         return cur.fetchall()
 
-def get_manager_record(telegram_id):
-    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-        cur.execute("SELECT * FROM users WHERE telegram_id=%s AND role=%s", (telegram_id, ROLE_MANAGER))
-        return cur.fetchone()
+def update_join_request_status(jr_id, status, decided_by):
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE join_requests SET status=%s, decided_at=UTC_TIMESTAMP(), decided_by=%s WHERE id=%s",
+            (status, decided_by, jr_id),
+        )
+    logger.info("Join request status updated | jr_id=%s status=%s decided_by=%s", jr_id, status, decided_by)
 
+def set_join_profile_field(jr_id, field, value):
+    if field not in ("first_name", "last_name", "phone"):
+        logger.warning("Ignored setting invalid join_profile field | field=%s", field)
+        return
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"UPDATE join_requests SET {field}=%s WHERE id=%s", (value, jr_id))
+    logger.info("Join request field set | jr_id=%s %s=%s", jr_id, field, value)
+
+# ---- employees list / deactivate ----
 def list_employees(manager_id, limit=25):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
             "SELECT id, telegram_id, username, first_name, last_name, phone, is_active "
-            "FROM users WHERE role=%s AND manager_id=%s ORDER BY created_at DESC LIMIT %s",
-            (ROLE_EMPLOYEE, manager_id, limit)
+            "FROM users WHERE role=%s AND manager_id=%s "
+            "ORDER BY created_at DESC, id DESC LIMIT %s",
+            (ROLE_EMPLOYEE, manager_id, limit),
         )
         return cur.fetchall()
 
-# ----------------- Bot Handlers -----------------
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles normal /start and deep-link /start <token>."""
-    tg = update.effective_user
-    text_args = context.args
-
-    # Ensure record (so managers can be recognized even if not seeded)
-    ensure_user_record(tg.id, tg.username)
-
-    if text_args:
-        token = text_args[0]
-        inv = get_invitation(token)
-        if not inv:
-            await update.message.reply_text("❌ Invalid invite link.")
-            return
-        if inv["status"] != "pending":
-            await update.message.reply_text("⚠️ This invite link is no longer valid.")
-            return
-        if datetime.utcnow() > inv["expires_at"]:
-            await update.message.reply_text("⌛ This invite link has expired.")
-            return
-
-        # Create/attach user (pending profile + approval)
-        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-            # If the user already exists, reuse; else create
-            cur.execute("SELECT * FROM users WHERE telegram_id=%s", (tg.id,))
-            u = cur.fetchone()
-            if not u:
-                cur.execute(
-                    "INSERT INTO users (telegram_id, username, role, is_active, manager_id) VALUES (%s,%s,%s,%s,%s)",
-                    (tg.id, tg.username, inv["invite_role"], 0, inv["manager_id"])
-                )
-                user_id = cur.lastrowid
-            else:
-                user_id = u["id"]
-                # Ensure role & manager are set from invitation if empty
-                if u["role"] != inv["invite_role"] or u["manager_id"] is None:
-                    cur2 = conn.cursor()
-                    cur2.execute("UPDATE users SET role=%s, manager_id=%s WHERE id=%s",
-                                 (inv["invite_role"], inv["manager_id"], user_id))
-
-        # Mark invite used and open approval record
-        mark_invitation_used(inv["id"], user_id)
-        approval_id = create_approval(user_id, inv["manager_id"])
-
-        # Store context for profile collection
-        context.user_data["onboard_user_id"] = user_id
-        context.user_data["approval_id"] = approval_id
-
-        await update.message.reply_text("👋 Welcome! Let's set up your profile.\n\nWhat is your *first name*?",
-                                        parse_mode="Markdown")
-        return ASK_FIRST
-
-
-# -------- Onboarding (collect profile) --------
-async def ask_first(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["first_name"] = update.message.text.strip()[:100]
-    await update.message.reply_text("Great. Your *last name*?", parse_mode="Markdown")
-    return ASK_LAST
-
-async def ask_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    context.user_data["last_name"] = update.message.text.strip()[:100]
-    await update.message.reply_text("Phone number (digits only, country code optional)?")
-    return ASK_PHONE
-
-async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    phone = "".join(ch for ch in update.message.text if ch.isdigit() or ch == '+')[:32]
-    context.user_data["phone"] = phone
-
-    user_id = context.user_data.get("onboard_user_id")
-    approval_id = context.user_data.get("approval_id")
-
-    # Save profile
-    set_user_profile(user_id, context.user_data["first_name"], context.user_data["last_name"], phone)
-
-    # Notify user pending approval
-    await update.message.reply_text("✅ Thanks! Your details are saved.\n"
-                                    "⏳ Waiting for manager approval...")
-
-    # Ping the manager with Approve/Reject buttons
-    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-        cur.execute("SELECT manager_id FROM users WHERE id=%s", (user_id,))
-        row = cur.fetchone()
-        manager_id = row["manager_id"]
-
-    kb = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Approve", callback_data=f"approve:{approval_id}:{user_id}"),
-            InlineKeyboardButton("❌ Reject", callback_data=f"reject:{approval_id}:{user_id}")
-        ]
-    ])
-
-    try:
-        await context.bot.send_message(
-            chat_id=manager_id,  # manager's telegram_id must match users.telegram_id
-            text=(f"👤 New user awaiting approval:\n"
-                  f"User ID: {user_id}\n"
-                  f"Name: {context.user_data['first_name']} {context.user_data['last_name']}\n"
-                  f"Phone: {phone}"),
-            reply_markup=kb
+def deactivate_employee(user_id, manager_id):
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "UPDATE users SET is_active=0 WHERE id=%s AND role=%s AND manager_id=%s",
+            (user_id, ROLE_EMPLOYEE, manager_id),
         )
-    except Exception:
-        # If manager hasn't started the bot, this will fail silently for now
-        pass
+        changed = cur.rowcount > 0
+    logger.info("Deactivate employee | user_id=%s manager_id=%s success=%s", user_id, manager_id, changed)
+    return changed
 
-    # Clear convo state
-    context.user_data.clear()
-    return ConversationHandler.END
+def get_telegram_id_by_user_row_id(row_id):
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT telegram_id FROM users WHERE id=%s", (row_id,))
+        r = cur.fetchone()
+        return r[0] if r else None
 
-# -------- Manager: Approve/Reject callbacks --------
-async def approval_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# ----------------- UI helpers -----------------
+def render_main_menu(telegram_id: int):
+    u = get_user_by_tg(telegram_id)
+    if not u:
+        text = (
+            "Welcome! If you’re an employee, please join via your invite link.\n"
+            "If Start didn’t work, send your invite code using `/use <code>`."
+        )
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("ℹ️ Help", callback_data="main:help")]])
+        return text, kb
+
+    if u["role"] == ROLE_MANAGER and u["is_active"] == 1:
+        text = "👋 Manager menu — choose an option:"
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("⚙️ Manage Users", callback_data="mgr:panel")],
+                [InlineKeyboardButton("ℹ️ Help", callback_data="main:help")],
+            ]
+        )
+        return text, kb
+
+    if u["is_active"] == 1:
+        text = "👋 Employee menu — choose an option:"
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("📝 Submit Report", callback_data="emp:report")],
+                [InlineKeyboardButton("ℹ️ Help", callback_data="main:help")],
+            ]
+        )
+    else:
+        text = "⏳ Your account is pending manager approval."
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("ℹ️ Help", callback_data="main:help")]])
+    return text, kb
+
+async def show_main_menu_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text, kb = render_main_menu(update.effective_user.id)
+    if update.message:
+        await update.message.reply_text(text, reply_markup=kb)
+    else:
+        await context.bot.send_message(chat_id=update.effective_chat.id, text=text, reply_markup=kb)
+
+def fmt_ist(dt_utc: datetime) -> str:
+    return dt_utc.astimezone(IST).strftime("%d %b %Y %I:%M %p IST")
+
+def human_left(dt_utc: datetime) -> str:
+    delta = dt_utc - datetime.now(UTC)
+    secs = int(delta.total_seconds())
+    if secs <= 0:
+        return "expired"
+    d, r = divmod(secs, 86400)
+    h, r = divmod(r, 3600)
+    m, _ = divmod(r, 60)
+    parts = []
+    if d: parts.append(f"{d}d")
+    if h: parts.append(f"{h}h")
+    if m and not d: parts.append(f"{m}m")
+    return "in " + " ".join(parts) if parts else "in <1m"
+
+def token_expired(inv_row) -> bool:
+    return datetime.now(UTC) > inv_row["expires_at"].replace(tzinfo=UTC)
+
+# ----------------- Token intake -----------------
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
+
+async def open_request_with_token(update: Update, context: ContextTypes.DEFAULT_TYPE, token: str):
+    """Verify invite token, open a join_request (pending), notify manager immediately."""
+    try:
+        inv = get_invitation(token)
+        if not inv or inv["status"] not in ("pending",):
+            if update.message:
+                await update.message.reply_text("❌ Invalid or inactive invite. Ask your manager for a new link.")
+            else:
+                await update.callback_query.edit_message_text("❌ Invalid or inactive invite. Ask your manager for a new link.")
+            logger.warning("Invite invalid or inactive | token=%s", token)
+            return
+
+        if token_expired(inv):
+            msg = f"⌛ Invite expired (IST: {fmt_ist(inv['expires_at'].replace(tzinfo=UTC))}). Ask your manager for a new link."
+            if update.message:
+                await update.message.reply_text(msg)
+            else:
+                await update.callback_query.edit_message_text(msg)
+            logger.info("Invite expired | token=%s expires_at=%s", token, inv["expires_at"])
+            return
+
+        tg = update.effective_user
+        existing = find_pending_request(tg.id, inv["id"])
+        if existing:
+            jr_id = existing["id"]
+            logger.info("Join request already pending | jr_id=%s tg=%s token=%s", jr_id, tg.id, token)
+        else:
+            jr_id = create_join_request_min(
+                telegram_id=tg.id,
+                username=tg.username,
+                manager_id=inv["manager_id"],
+                invite_role=inv["invite_role"],
+                invitation_id=inv["id"],
+            )
+
+        # Inform employee
+        if update.message:
+            await update.message.reply_text("✅ Request sent to your manager. You’ll be notified when it’s approved.")
+        else:
+            await context.bot.send_message(chat_id=update.effective_chat.id,
+                                           text="✅ Request sent to your manager. You’ll be notified when it’s approved.")
+
+        # Notify manager
+        mgr_tg = get_telegram_id_by_user_row_id(inv["manager_id"])
+        created_naive = get_join_request(jr_id)["created_at"]
+        deadline = inv["expires_at"].replace(tzinfo=UTC)
+        kb = InlineKeyboardMarkup(
+            [
+                [
+                    InlineKeyboardButton("✅ Approve", callback_data=f"jr:approve:{jr_id}"),
+                    InlineKeyboardButton("❌ Reject", callback_data=f"jr:reject:{jr_id}"),
+                ],
+                [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+            ]
+        )
+        try:
+            await context.bot.send_message(
+                chat_id=mgr_tg,
+                text=(
+                    f"👤 New join request (#{jr_id})\n"
+                    f"tg: {tg.id}  (@{tg.username or '-'})\n"
+                    f"Requested: {fmt_ist(created_naive.replace(tzinfo=UTC))}\n"
+                    f"Expires: {fmt_ist(deadline)} ({human_left(deadline)})"
+                ),
+                reply_markup=kb,
+            )
+            logger.info("Manager notified | manager_tg=%s jr_id=%s", mgr_tg, jr_id)
+        except Exception as e:
+            logger.exception("Failed to notify manager | manager_tg=%s jr_id=%s error=%s", mgr_tg, jr_id, e)
+
+    except Exception as e:
+        logger.exception("open_request_with_token failed | token=%s error=%s", token, e)
+        # Always use send_message here to avoid signature mismatch
+        if isinstance(update, Update) and update.effective_chat:
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id,
+                                               text="⚠️ Something went wrong. Please try again.")
+            except Exception:
+                pass
+
+# ----------------- Handlers -----------------
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handles /start and deep-link /start <token> (opens request, not profile)."""
+    args = context.args
+    if args:
+        token = args[0].strip()
+        logger.info("/start with arg | user=%s token=%s", update.effective_user.id, token)
+        if UUID_RE.match(token):
+            await open_request_with_token(update, context, token)
+            return
+    # No token flow
+    u = get_user_by_tg(update.effective_user.id)
+    if u:
+        await show_main_menu_message(update, context)
+    else:
+        msg = (
+            "Hi! To join as an employee, please use your invite link.\n\n"
+            "If Start didn’t ask you, send your invite code using:\n"
+            "`/use <paste-your-code>`"
+        )
+        await update.message.reply_text(msg, parse_mode="Markdown")
+
+async def use_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not context.args:
+        await update.message.reply_text("Usage: `/use <invite-code>`", parse_mode="Markdown")
+        return
+    token = context.args[0].strip()
+    logger.info("/use | user=%s token=%s", update.effective_user.id, token)
+    if not UUID_RE.match(token):
+        await update.message.reply_text("❌ That doesn't look like a valid invite code.")
+        return
+    await open_request_with_token(update, context, token)
+
+async def detect_uuid_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """If a user pastes a raw UUID, treat it as an invite code."""
+    txt = (update.message.text or "").strip()
+    if UUID_RE.match(txt):
+        logger.info("Raw UUID detected in chat | user=%s token=%s", update.effective_user.id, txt)
+        await open_request_with_token(update, context, txt)
+        return
+    await show_main_menu_message(update, context)
+
+# -------- Manager: Approve/Reject join request --------
+async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
 
-    acting_tg = update.effective_user.id
-    if not is_manager(acting_tg):
+    if not is_manager(update.effective_user.id):
         await query.edit_message_text("Only managers can perform this action.")
         return
 
-    data = query.data  # approve:<approval_id>:<user_id> or reject:...
-    action, approval_id, user_id = data.split(":")
-    approval_id = int(approval_id)
-    user_id = int(user_id)
+    _, action, jr_id_s = query.data.split(":")
+    jr_id = int(jr_id_s)
+    mrec = get_manager_record(update.effective_user.id)
+    jr = get_join_request(jr_id)
 
-    mrec = get_manager_record(acting_tg)
-    if not mrec:
-        await query.edit_message_text("Manager record not found.")
+    if not jr or jr["manager_id"] != mrec["id"] or jr["status"] != "pending":
+        await query.edit_message_text("This request is no longer pending.")
+        logger.info("Approve/reject ignored | jr_id=%s manager=%s", jr_id, mrec["id"])
         return
 
-    # Activate or reject
-    if action == "approve":
-        activate_user(user_id, manager_id=mrec["id"])
-        update_approval(approval_id, "approved", decided_by=mrec["id"])
-        await query.edit_message_text(f"✅ Approved user {user_id}. They can now use the bot.")
-        try:
-            await context.bot.send_message(chat_id=get_user_by_id(user_id)["telegram_id"],
-                                           text="🎉 Your account is approved. You can use the bot now.")
-        except Exception:
-            pass
-    else:
-        update_approval(approval_id, "rejected", decided_by=mrec["id"])
-        await query.edit_message_text(f"❌ Rejected user {user_id}.")
-        try:
-            await context.bot.send_message(chat_id=get_user_by_id(user_id)["telegram_id"],
-                                           text="⚠️ Your account was rejected by your manager.")
-        except Exception:
-            pass
+    # Check invitation validity at decision time
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute("SELECT * FROM invitations WHERE id=%s", (jr["invitation_id"],))
+        inv = cur.fetchone()
+    if not inv or token_expired(inv):
+        update_join_request_status(jr_id, "rejected", decided_by=mrec["id"])
+        await query.edit_message_text(
+            "⛔ Invitation expired. Ask the user to use a fresh invite.",
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("➕ New Invite", callback_data="mgr:invite")],
+                    [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+                ]
+            ),
+        )
+        logger.info("Decision failed due to expired invite | jr_id=%s inv_id=%s", jr_id, jr["invitation_id"])
+        return
 
-# -------- Manager menu (/manage) --------
+    if action == "approve":
+        update_join_request_status(jr_id, "approved", decided_by=mrec["id"])
+        # Ask user to start profile now
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🧾 Start Profile", callback_data=f"prof:start:{jr_id}")]])
+        try:
+            await context.bot.send_message(
+                chat_id=jr["telegram_id"],
+                text="✅ Your request has been approved. Please complete your profile to finish joining.",
+                reply_markup=kb,
+            )
+            logger.info("Approval sent to user | jr_id=%s user_tg=%s", jr_id, jr["telegram_id"])
+        except Exception as e:
+            logger.exception("Failed to notify user of approval | jr_id=%s error=%s", jr_id, e)
+
+        await query.edit_message_text(
+            "Approved. The user has been asked to complete their profile.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")]]),
+        )
+    else:
+        update_join_request_status(jr_id, "rejected", decided_by=mrec["id"])
+        try:
+            await context.bot.send_message(
+                chat_id=jr["telegram_id"],
+                text="❌ Your join request was rejected by your manager.",
+            )
+            logger.info("Rejection sent to user | jr_id=%s user_tg=%s", jr_id, jr["telegram_id"])
+        except Exception as e:
+            logger.exception("Failed to notify user of rejection | jr_id=%s error=%s", jr_id, e)
+        await query.edit_message_text(
+            "Rejected.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")]]),
+        )
+
+# -------- Profile flow (after approval) --------
+async def profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry via callback prof:start:<jr_id> from the employee."""
+    query = update.callback_query
+    await query.answer()
+
+    _, _, jr_id_s = query.data.split(":")
+    jr_id = int(jr_id_s)
+    jr = get_join_request(jr_id)
+    if not jr or jr["status"] != "approved":
+        await query.edit_message_text("This request is not approved or no longer valid.")
+        return ConversationHandler.END
+
+    if jr["telegram_id"] != update.effective_user.id:
+        await query.edit_message_text("This profile link is not for you.")
+        return ConversationHandler.END
+
+    # If already active, don't ask again
+    if user_active_by_tg(jr["telegram_id"]):
+        await query.edit_message_text("✅ Your profile is already completed.")
+        logger.info("Profile already completed | tg=%s jr_id=%s", jr["telegram_id"], jr_id)
+        return ConversationHandler.END
+
+    # Ensure invitation still valid
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute("SELECT * FROM invitations WHERE id=%s", (jr["invitation_id"],))
+        inv = cur.fetchone()
+    if not inv or token_expired(inv):
+        await query.edit_message_text("⛔ The invite expired. Ask your manager for a new one.")
+        logger.info("Profile start failed due to expired invite | jr_id=%s", jr_id)
+        return ConversationHandler.END
+
+    context.user_data["profile_jr_id"] = jr_id
+    await query.edit_message_text("Your *first name*?", parse_mode="Markdown")
+    logger.info("Profile collection started | jr_id=%s", jr_id)
+    return ASK_FIRST
+
+async def ask_first(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    jr_id = context.user_data.get("profile_jr_id")
+    if not jr_id:
+        await update.message.reply_text("Session expired. Tap the *Start Profile* button again.", parse_mode="Markdown")
+        return ConversationHandler.END
+    first_name = (update.message.text or "").strip()[:100]
+    set_join_profile_field(jr_id, "first_name", first_name)
+    await update.message.reply_text("Your *last name*?", parse_mode="Markdown")
+    return ASK_LAST
+
+async def ask_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    jr_id = context.user_data.get("profile_jr_id")
+    if not jr_id:
+        await update.message.reply_text("Session expired. Tap the *Start Profile* button again.", parse_mode="Markdown")
+        return ConversationHandler.END
+    last_name = (update.message.text or "").strip()[:100]
+    set_join_profile_field(jr_id, "last_name", last_name)
+    await update.message.reply_text("Your phone number (digits only, country code optional)?")
+    return ASK_PHONE
+
+async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    jr_id = context.user_data.get("profile_jr_id")
+    if not jr_id:
+        await update.message.reply_text("Session expired. Tap the *Start Profile* button again.", parse_mode="Markdown")
+        return ConversationHandler.END
+
+    phone = "".join(ch for ch in (update.message.text or "") if ch.isdigit() or ch == "+")[:32]
+    set_join_profile_field(jr_id, "phone", phone)
+
+    # Finalize → create/update users row now
+    jr = get_join_request(jr_id)
+    if not jr or jr["status"] != "approved":
+        await update.message.reply_text("This request is no longer valid.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    try:
+        with db_conn() as conn, conn.cursor() as cur:
+            cur.execute("SELECT id FROM users WHERE telegram_id=%s", (jr["telegram_id"],))
+            row = cur.fetchone()
+            if row:
+                user_id = row[0]
+                cur.execute(
+                    "UPDATE users "
+                    "SET role=%s, manager_id=%s, username=%s, first_name=%s, last_name=%s, phone=%s, is_active=1 "
+                    "WHERE id=%s",
+                    (jr["invite_role"], jr["manager_id"], jr.get("username"),
+                     jr.get("first_name"), jr.get("last_name"), phone, user_id),
+                )
+                logger.info("Existing user updated from profile | user_id=%s jr_id=%s", user_id, jr_id)
+            else:
+                cur.execute(
+                    "INSERT INTO users "
+                    "(telegram_id, username, role, is_active, manager_id, first_name, last_name, phone) "
+                    "VALUES (%s,%s,%s,1,%s,%s,%s,%s)",
+                    (jr["telegram_id"], jr.get("username"), jr["invite_role"], jr["manager_id"],
+                     jr.get("first_name"), jr.get("last_name"), phone),
+                )
+                user_id = cur.lastrowid
+                logger.info("New user created from profile | user_id=%s jr_id=%s", user_id, jr_id)
+
+        # Mark invitation used AFTER user is created
+        mark_invitation_used(jr["invitation_id"], user_id)
+
+        await update.message.reply_text("🎉 Your records have been inserted. You can use the bot now.")
+        context.user_data.clear()
+        await show_main_menu_message(update, context)
+    except Exception as e:
+        logger.exception("Finalizing profile failed | jr_id=%s error=%s", jr_id, e)
+        await update.message.reply_text("⚠️ Something went wrong saving your profile. Please try again.")
+        context.user_data.clear()
+    return ConversationHandler.END
+
+# -------- Manager panel --------
+def manager_panel_kb():
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("👥 Show Users", callback_data="mgr:show_users")],
+            [InlineKeyboardButton("➕ Invite Users", callback_data="mgr:invite")],
+            [InlineKeyboardButton("⏳ Pending Approvals", callback_data="mgr:pending")],
+            [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")],
+        ]
+    )
+
 async def manage(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_manager(update.effective_user.id):
         await update.message.reply_text("You are not a manager.")
         return
-
-    kb = InlineKeyboardMarkup([
-        [InlineKeyboardButton("👥 Show Users", callback_data="mgr:show_users")],
-        [InlineKeyboardButton("➕ Invite Users", callback_data="mgr:invite")],
-        [InlineKeyboardButton("⏳ Pending Approvals", callback_data="mgr:pending")]
-    ])
-    await update.message.reply_text("Manager panel:", reply_markup=kb)
+    await update.message.reply_text("Manager panel:", reply_markup=manager_panel_kb())
 
 async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -319,81 +592,268 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("You are not a manager.")
         return
 
-    data = query.data
     tg = update.effective_user
+    mgr = get_manager_record(tg.id)
+    data = query.data
+    logger.info("Manager button | manager_tg=%s action=%s", tg.id, data)
+
+    if data in ("mgr:panel", "mgr:back"):
+        await query.edit_message_text("Manager panel:", reply_markup=manager_panel_kb())
+        return
 
     if data == "mgr:invite":
-        mgr = get_manager_record(tg.id)
-        token, expires_at = create_invitation(manager_id=mgr["id"], invite_role=ROLE_EMPLOYEE)
+        token, exp_utc = create_invitation(manager_id=mgr["id"], invite_role=ROLE_EMPLOYEE)
         link = f"https://t.me/{BOT_USERNAME}?start={token}"
-        await query.edit_message_text(
-            "🔗 Share this invite link with your employee:\n"
+        text = (
+            "🔗 Share this invite with your employee:\n"
             f"{link}\n\n"
-            f"Expires at (UTC): {expires_at:%Y-%m-%d %H:%M:%S}"
+            f"Expires (IST): {fmt_ist(exp_utc)}\n"
+            f"Time left: {human_left(exp_utc)}\n\n"
+            "If Start didn’t ask them, they can send:\n"
+            f"/use {token}"
+        )
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")],
+            ]
+        )
+        await query.edit_message_text(text, reply_markup=kb, disable_web_page_preview=True)
+        return
+
+    if data == "mgr:pending":
+        items = get_pending_join_requests(mgr["id"])
+        if not items:
+            await query.edit_message_text(
+                "No pending approvals.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
+                     [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]
+                ),
+            )
+            return
+
+        await query.edit_message_text(
+            f"Pending approvals: {len(items)} (each request shown below).",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
+                 [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]
+            ),
         )
 
-    elif data == "mgr:show_users":
-        mgr = get_manager_record(tg.id)
+        for jr in items:
+            with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+                cur.execute("SELECT * FROM invitations WHERE id=%s", (jr["invitation_id"],))
+                inv = cur.fetchone()
+            deadline = inv["expires_at"].replace(tzinfo=UTC)
+            still_ok = datetime.now(UTC) <= deadline
+
+            text = (
+                f"Req #{jr['id']} — tg:{jr['telegram_id']} (@{jr['username'] or '-'})\n"
+                f"Requested: {fmt_ist(jr['created_at'].replace(tzinfo=UTC))}\n"
+                f"Expires: {fmt_ist(deadline)} ({human_left(deadline)})"
+            )
+
+            if still_ok:
+                buttons = [
+                    [
+                        InlineKeyboardButton("✅ Approve", callback_data=f"jr:approve:{jr['id']}"),
+                        InlineKeyboardButton("❌ Reject", callback_data=f"jr:reject:{jr['id']}"),
+                    ],
+                    [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+                ]
+            else:
+                buttons = [
+                    [InlineKeyboardButton("⛔ Expired — Re-Invite", callback_data="mgr:invite")],
+                    [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+                ]
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=text,
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
+        return
+
+    if data == "mgr:show_users":
         emps = list_employees(mgr["id"], limit=25)
         if not emps:
-            await query.edit_message_text("No employees yet.")
+            await query.edit_message_text(
+                "No employees yet.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
+                     [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]
+                ),
+            )
             return
-        lines = []
+
+        await query.edit_message_text(
+            f"Employees (latest {len(emps)}). Each user is shown below.",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
+                 [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]
+            ),
+        )
+
         for e in emps:
-            lines.append(f"• {e['first_name'] or ''} {e['last_name'] or ''} "
-                         f"(tg:{e['telegram_id'] or '-'}, active:{'Y' if e['is_active']==1 else 'N'})")
-        await query.edit_message_text("👥 Employees (latest 25):\n" + "\n".join(lines))
+            name = f"{e['first_name'] or ''} {e['last_name'] or ''}".strip() or "-"
+            txt = (
+                f"👤 {name}\n"
+                f"User ID: {e['id']}\n"
+                f"tg: {e['telegram_id'] or '-'}\n"
+                f"Phone: {e['phone'] or '-'}\n"
+                f"Active: {'Yes' if e['is_active']==1 else 'No'}"
+            )
+            buttons = [
+                [InlineKeyboardButton("🗑️ Deactivate", callback_data=f"mgr:delask:{e['id']}")],
+                [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+            ]
+            await context.bot.send_message(
+                chat_id=update.effective_chat.id,
+                text=txt,
+                reply_markup=InlineKeyboardMarkup(buttons),
+            )
+        return
 
-    elif data == "mgr:pending":
-        mgr = get_manager_record(tg.id)
-        items = get_pending_approvals(mgr["id"])
-        if not items:
-            await query.edit_message_text("No pending approvals.")
-            return
-        # Show as a compact list; actions still on each approval Via auto DM messages. Here we just preview.
-        lines = [f"• #{row['approval_id']} — {row['first_name'] or ''} {row['last_name'] or ''} (user {row['id']})"
-                 for row in items]
-        await query.edit_message_text("⏳ Pending approvals:\n" + "\n".join(lines))
+    if data.startswith("mgr:delask:"):
+        _, _, uid = data.split(":")
+        uid = int(uid)
+        kb = InlineKeyboardMarkup(
+            [[InlineKeyboardButton("✅ Yes, deactivate", callback_data=f"mgr:del:{uid}"),
+              InlineKeyboardButton("❌ Cancel", callback_data="mgr:panel")]]
+        )
+        await query.edit_message_text(
+            f"Are you sure you want to deactivate user #{uid}? (They will lose access.)",
+            reply_markup=kb,
+        )
+        return
 
-# -------- Utility: help and cancel --------
+    if data.startswith("mgr:del:"):
+        _, _, uid = data.split(":")
+        uid = int(uid)
+        ok = deactivate_employee(uid, mgr["id"])
+        if ok:
+            await query.edit_message_text(
+                f"✅ User #{uid} deactivated.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]]),
+            )
+        else:
+            await query.edit_message_text(
+                "⚠️ Could not deactivate (wrong manager or already inactive).",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]]),
+            )
+        return
+
+# -------- Main menu callbacks (help/report/home) --------
+async def main_menu_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "main:menu":
+        text, kb = render_main_menu(update.effective_user.id)
+        await query.edit_message_text(text, reply_markup=kb)
+        return
+
+    if data == "main:help":
+        u = get_user_by_tg(update.effective_user.id)
+        if u and u["role"] == ROLE_MANAGER and u["is_active"] == 1:
+            txt = (
+                "Help for Managers:\n"
+                "• Create invites and approve within 24 hours.\n"
+                "• Approval asks the employee to complete their profile.\n"
+                "• Employees submit daily reports which you review."
+            )
+        else:
+            txt = (
+                "Help for Employees:\n"
+                "• This is a report bot.\n"
+                "• Use *Submit Report* to fill your daily report based on your work data.\n"
+                "• Your manager receives your report each day."
+            )
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]])
+        await query.edit_message_text(txt, reply_markup=kb, parse_mode="Markdown")
+        return
+
+    if data == "emp:report":
+        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]])
+        await query.edit_message_text(
+            "📝 This is a report bot.\n"
+            "Tap the report action to fill your **daily** report based on your work data. "
+            "Once submitted, your manager will receive it.",
+            reply_markup=kb,
+            parse_mode="Markdown",
+        )
+        return
+
+# -------- Utility --------
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "/manage – manager panel (invite/show/pending)\n"
-        "Managers share invite links; new users fill profile; manager approves."
-    )
+    u = get_user_by_tg(update.effective_user.id)
+    if u and u["role"] == ROLE_MANAGER and u["is_active"] == 1:
+        txt = (
+            "Help for Managers:\n"
+            "• Create invites and approve within 24 hours.\n"
+            "• Approval asks the employee to complete their profile.\n"
+            "• Employees submit daily reports which you review."
+        )
+    else:
+        txt = (
+            "Help for Employees:\n"
+            "• This is a report bot.\n"
+            "• Use *Submit Report* to fill your daily report based on your work data.\n"
+            "• If your invite link's Start didn’t work, send `/use <code>`."
+        )
+    kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]])
+    await update.message.reply_text(txt, reply_markup=kb, parse_mode="Markdown")
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await update.message.reply_text("Canceled.")
     return ConversationHandler.END
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    logger.exception("Unhandled error | update=%s error=%s", update, context.error)
+    try:
+        if isinstance(update, Update) and update.effective_chat:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text="⚠️ An error occurred. Please try again.")
+    except Exception:
+        pass
+
 # ----------------- Main -----------------
 def main():
+    logger.info("Starting bot...")
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
-    # Start & whoami & manage
+    # Commands
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("manage", manage))
     app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("use", use_cmd))  # deep-link fallback
 
-    # Manager button actions
+    # Manager callbacks (panel + invite + pending + show users)
     app.add_handler(CallbackQueryHandler(manager_buttons, pattern=r"^mgr:"))
-    app.add_handler(CallbackQueryHandler(approval_callback, pattern=r"^(approve|reject):"))
-
-    # Onboarding conversation
-    conv = ConversationHandler(
-        entry_points=[],
+    # Join request approve/reject
+    app.add_handler(CallbackQueryHandler(join_request_callback, pattern=r"^jr:(approve|reject):\d+$"))
+    # Profile entry button (after approval)
+    profile_conv = ConversationHandler(
+        entry_points=[CallbackQueryHandler(profile_start, pattern=r"^prof:start:\d+$")],
         states={
             ASK_FIRST: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_first)],
             ASK_LAST:  [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_last)],
             ASK_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        map_to_parent={}
     )
-    app.add_handler(conv)
+    app.add_handler(profile_conv)
 
-    print("Bot running...")
+    # Main menu callbacks (help/report/home)
+    app.add_handler(CallbackQueryHandler(main_menu_callbacks, pattern=r"^(main:|emp:)"))
+
+    # Raw UUID pasted by a user
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, detect_uuid_text))
+
+    # Error handler
+    app.add_error_handler(error_handler)
+
+    logger.info("Bot running...")
     app.run_polling()
 
 if __name__ == "__main__":

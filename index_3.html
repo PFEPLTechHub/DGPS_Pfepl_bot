@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Drone Flight Data Entry</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f5f5f5;
+    }
+    h2 {
+      color: #333;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input, select, textarea {
+      width: 300px;
+      padding: 6px;
+      margin-top: 4px;
+    }
+    .flight-section {
+      border: 1px solid #ccc;
+      padding: 15px;
+      margin: 10px 0;
+      background: #fff;
+      border-radius: 6px;
+    }
+    .totals {
+      background: #e6f7ff;
+      padding: 10px;
+      margin-top: 15px;
+      border-radius: 6px;
+    }
+    button {
+      margin-top: 20px;
+      padding: 10px 20px;
+      background: #007bff;
+      border: none;
+      color: white;
+      font-size: 16px;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+  </style>
+</head>
+<body>
+  <h2>Drone Flight Data Entry</h2>
+
+  <!-- Site Name -->
+  <label>Site Name:</label>
+  <select id="siteName">
+    <option value="">-- Select Site --</option>
+    <option value="Karnataka SOI_LSM">Karnataka SOI_LSM</option>
+    <option value="Karnataka SOI_AMRUT 2.O">Karnataka SOI_AMRUT 2.O</option>
+    <option value="Kerala SOI_AMRUT 2.O">Kerala SOI_AMRUT 2.O</option>
+    <option value="Gujarath SOI_SVAMITVA">Gujarath SOI_SVAMITVA</option>
+    <option value="Assam SOI_AMRUT 2.O">Assam SOI_AMRUT 2.O</option>
+    <option value="Hindon River_UP">Hindon River_UP</option>
+    <option value="UP SOI_AMRUT 2.0">UP SOI_AMRUT 2.0</option>
+  </select>
+
+  <!-- Date -->
+  <label>Date:</label>
+  <input type="date" id="date">
+
+  <!-- Drone used -->
+  <label>Drone Used:</label>
+  <select id="droneUsed">
+    <option value="">-- Select Drone --</option>
+    <option value="Q6_QQC11279">Q6_QQC11279</option>
+    <option value="Q6_QQC11280">Q6_QQC11280</option>
+    <option value="Q6_QQC11281">Q6_QQC11281</option>
+    <option value="Q6_QQC11282">Q6_QQC11282</option>
+    <option value="Netra_RRC11276">Netra_RRC11276</option>
+    <option value="Ryno_PP421233">Ryno_PP421233</option>
+    <option value="Ryno_PP421234">Ryno_PP421234</option>
+    <option value="Ryno_PP421235">Ryno_PP421235</option>
+    <option value="Ryno_PP421247">Ryno_PP421247</option>
+    <option value="Ryno_PP421248">Ryno_PP421248</option>
+    <option value="SnapM_CDSSNPV2230038">SnapM_CDSSNPV2230038</option>
+    <option value="SnapM_CDSSNPV2230049">SnapM_CDSSNPV2230049</option>
+    <option value="SnapM_CDSSNPV2230051">SnapM_CDSSNPV2230051</option>
+    <option value="SnapM_CDSSNPV2230053">SnapM_CDSSNPV2230053</option>
+    <option value="SnapM_CDSSNPV2230054">SnapM_CDSSNPV2230054</option>
+    <option value="Striver_1">Striver_1</option>
+    <option value="Striver_2">Striver_2</option>
+  </select>
+
+  <!-- DGPS Used -->
+  <label>DGPS Used:</label>
+  If multiple entries separate them by commas.
+  <br>
+  <input type="text" id="dgpsUsed" placeholder="e.g. R4S - 314, DA2 - 739">
+
+  <label>Name of DGPS Operators:</label>
+  If multiple entries separate them by commas.
+  <br>
+  <input type="text" id="dgpsOperators" placeholder="e.g. R4S, DA2">
+
+  <label>Name of Pilot:</label>
+  <input type="text" id="pilotName" placeholder="Enter Pilot Name">
+
+  <label>Name of Copilot:</label>
+  <input type="text" id="copilotName" placeholder="Enter Copilot Name">
+
+  <!-- Base Height -->
+  <label>Base Height (Mtr):</label>
+  <input type="number" id="baseHeight">
+
+  <!-- Number of Flights -->
+  <label>No of Flights:</label>
+  <select id="noOfFlights" onchange="generateFlights()">
+    <option value="">-- Select --</option>
+    <option value="1">1</option>
+    <option value="2">2</option>
+    <option value="3">3</option>
+    <option value="4">4</option>
+    <option value="5">5</option>
+    <option value="6">6</option>
+    <option value="7">7</option>
+    <option value="8">8</option>
+    <option value="9">9</option>
+    <option value="10">10</option>
+  </select>
+
+  <!-- Flight Details -->
+  <div id="flightsContainer"></div>
+
+  <!-- Grid Numbers -->
+  <label>Grid Numbers / Block Number:</label>
+  If multiple entries separate them by commas.
+  <br>
+  <input type="text" id="gridNumbers" placeholder="e.g. H43R12A17, H43R12A22">
+
+  <!-- GCP Points Covered -->
+  <label>GCP Points Covered:</label>
+  If multiple entries separate them by commas.
+  <br>
+  <input type="text" id="gcpPoints" placeholder="e.g. CP1, CP2, CK1, CK2">
+
+  <!-- Totals -->
+  <div class="totals">
+    <label>Total Area Covered (Sq km):</label>
+    <input type="number" id="totalArea" readonly>
+
+    <label>Total Flight Time (Min):</label>
+    <input type="number" id="totalTime" readonly>
+  </div>
+
+  <!-- Remark -->
+  <label>Remark:</label>
+  <textarea id="remark" rows="3"></textarea>
+
+  <br>
+
+  <!-- Submit Button -->
+  <button onclick="handleSubmit()">Submit</button>
+
+  <script>
+    // Generate flight input sections
+    function generateFlights() {
+      const count = document.getElementById("noOfFlights").value;
+      const container = document.getElementById("flightsContainer");
+      container.innerHTML = "";
+
+      for (let i = 1; i <= count; i++) {
+        const div = document.createElement("div");
+        div.className = "flight-section";
+        div.innerHTML = `
+          <h3>Flight ${i}</h3>
+          <label>Flight Time (Min):</label>
+          <input type="number" class="flightTime" oninput="updateTotals()">
+          
+          <label>Area Covered (Sq km):</label>
+          <input type="number" class="flightArea" oninput="updateTotals()">
+          
+          <label>UAV Rover File (UBX No):</label>
+          <input type="text">
+          
+          <label>Drone Base File No:</label>
+          <input type="text">
+        `;
+        container.appendChild(div);
+      }
+      updateTotals();
+    }
+
+    // Calculate totals
+    function updateTotals() {
+      let totalTime = 0;
+      let totalArea = 0;
+
+      document.querySelectorAll(".flightTime").forEach(input => {
+        totalTime += Number(input.value) || 0;
+      });
+
+      document.querySelectorAll(".flightArea").forEach(input => {
+        totalArea += Number(input.value) || 0;
+      });
+
+      document.getElementById("totalTime").value = totalTime;
+      document.getElementById("totalArea").value = totalArea;
+    }
+
+    // Handle form submission
+    function handleSubmit() {
+      alert("Form Submitted Successfully!");
+      // Here you can send data to server with fetch/ajax
+    }
+  </script>
+</body>
+</html>
