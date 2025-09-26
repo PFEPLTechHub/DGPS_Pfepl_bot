@@ -104,7 +104,7 @@ def create_invitation(manager_id, invite_role=ROLE_EMPLOYEE):
             (token, manager_id, invite_role, expires_at_db),
         )
     logger.info("Invitation created | token=%s manager_id=%s expires_at_utc=%s", token, manager_id, expires_at_utc)
-    return token, expires_at_utc
+    return token, exp_utc
 
 def get_invitation(token):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
@@ -181,6 +181,16 @@ def list_employees(manager_id, limit=25):
             "SELECT id, telegram_id, username, first_name, last_name, phone, is_active "
             "FROM users WHERE role=%s AND manager_id=%s "
             "ORDER BY created_at DESC, id DESC LIMIT %s",
+            (ROLE_EMPLOYEE, manager_id, limit),
+        )
+        return cur.fetchall()
+
+def list_active_employees(manager_id, limit=50):
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute(
+            "SELECT id, first_name, last_name FROM users "
+            "WHERE role=%s AND manager_id=%s AND is_active=1 "
+            "ORDER BY first_name, last_name, id LIMIT %s",
             (ROLE_EMPLOYEE, manager_id, limit),
         )
         return cur.fetchall()
@@ -337,7 +347,6 @@ async def open_request_with_token(update: Update, context: ContextTypes.DEFAULT_
 
     except Exception as e:
         logger.exception("open_request_with_token failed | token=%s error=%s", token, e)
-        # Always use send_message here to avoid signature mismatch
         if isinstance(update, Update) and update.effective_chat:
             try:
                 await context.bot.send_message(chat_id=update.effective_chat.id,
@@ -584,6 +593,23 @@ async def manage(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     await update.message.reply_text("Manager panel:", reply_markup=manager_panel_kb())
 
+# ===== Helpers for Show Users redesigned flow =====
+def _format_employee_line(e):
+    fname = (e["first_name"] or "").strip()
+    lname = (e["last_name"] or "").strip()
+    name = (fname + " " + lname).strip() or "Unnamed"
+    active = "Yes" if e["is_active"] == 1 else "No"
+    return f"• {name} — Active: {active}"
+
+def _employee_name_by_id(user_id):
+    u = get_user_by_id(user_id)
+    if not u:
+        return f"User #{user_id}"
+    fname = (u["first_name"] or "").strip()
+    lname = (u["last_name"] or "").strip()
+    name = (fname + " " + lname).strip() or f"User #{user_id}"
+    return name
+
 async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -674,55 +700,72 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    # ======= Redesigned "Show Users" =======
     if data == "mgr:show_users":
         emps = list_employees(mgr["id"], limit=25)
         if not emps:
             await query.edit_message_text(
                 "No employees yet.",
                 reply_markup=InlineKeyboardMarkup(
-                    [[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
-                     [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]
+                    [[InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")]]
                 ),
             )
             return
 
-        await query.edit_message_text(
-            f"Employees (latest {len(emps)}). Each user is shown below.",
-            reply_markup=InlineKeyboardMarkup(
-                [[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
-                 [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]
-            ),
-        )
+        # Build a clean list: First Last — Active: Yes/No
+        lines = [_format_employee_line(e) for e in emps]
+        buttons = [
+            [InlineKeyboardButton("🗑️ Deactivate", callback_data="mgr:deactivate:list")],
+            [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+        ]
 
-        for e in emps:
-            name = f"{e['first_name'] or ''} {e['last_name'] or ''}".strip() or "-"
-            txt = (
-                f"👤 {name}\n"
-                f"User ID: {e['id']}\n"
-                f"tg: {e['telegram_id'] or '-'}\n"
-                f"Phone: {e['phone'] or '-'}\n"
-                f"Active: {'Yes' if e['is_active']==1 else 'No'}"
+        await query.edit_message_text(
+            "👥 Employees (latest 25):\n" + "\n".join(lines),
+            reply_markup=InlineKeyboardMarkup(buttons),
+        )
+        return
+
+    # Deactivate list (selection screen)
+    if data == "mgr:deactivate:list":
+        actives = list_active_employees(mgr["id"], limit=50)
+        if not actives:
+            await query.edit_message_text(
+                "No active employees to deactivate.",
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton("⬅️ Back to Users", callback_data="mgr:show_users")],
+                     [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")]]
+                ),
             )
-            buttons = [
-                [InlineKeyboardButton("🗑️ Deactivate", callback_data=f"mgr:delask:{e['id']}")],
-                [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
-            ]
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=txt,
-                reply_markup=InlineKeyboardMarkup(buttons),
-            )
+            return
+
+        # Build selectable list of active employees (buttons)
+        rows = []
+        for emp in actives:
+            name = ((emp["first_name"] or "") + " " + (emp["last_name"] or "")).strip() or f"User #{emp['id']}"
+            rows.append([InlineKeyboardButton(name, callback_data=f"mgr:delask:{emp['id']}")])
+
+        rows.append([InlineKeyboardButton("⬅️ Back to Users", callback_data="mgr:show_users")])
+        rows.append([InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")])
+
+        await query.edit_message_text(
+            "Select an employee to deactivate:",
+            reply_markup=InlineKeyboardMarkup(rows),
+        )
         return
 
     if data.startswith("mgr:delask:"):
         _, _, uid = data.split(":")
         uid = int(uid)
+        name = _employee_name_by_id(uid)
         kb = InlineKeyboardMarkup(
-            [[InlineKeyboardButton("✅ Yes, deactivate", callback_data=f"mgr:del:{uid}"),
-              InlineKeyboardButton("❌ Cancel", callback_data="mgr:panel")]]
+            [
+                [InlineKeyboardButton("✅ Yes, deactivate", callback_data=f"mgr:del:{uid}")],
+                [InlineKeyboardButton("⬅️ Back to Selection", callback_data="mgr:deactivate:list")],
+                [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+            ]
         )
         await query.edit_message_text(
-            f"Are you sure you want to deactivate user #{uid}? (They will lose access.)",
+            f"Are you sure you want to deactivate {name}?",
             reply_markup=kb,
         )
         return
@@ -731,16 +774,17 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, _, uid = data.split(":")
         uid = int(uid)
         ok = deactivate_employee(uid, mgr["id"])
-        if ok:
-            await query.edit_message_text(
-                f"✅ User #{uid} deactivated.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]]),
-            )
-        else:
-            await query.edit_message_text(
-                "⚠️ Could not deactivate (wrong manager or already inactive).",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]]),
-            )
+        msg = "✅ User deactivated." if ok else "⚠️ Could not deactivate (wrong manager or already inactive)."
+        await query.edit_message_text(
+            msg,
+            reply_markup=InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("🗑️ Deactivate another", callback_data="mgr:deactivate:list")],
+                    [InlineKeyboardButton("⬅️ Back to Users", callback_data="mgr:show_users")],
+                    [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+                ]
+            ),
+        )
         return
 
 # -------- Main menu callbacks (help/report/home) --------
@@ -828,7 +872,7 @@ def main():
     app.add_handler(CommandHandler("help", help_cmd))
     app.add_handler(CommandHandler("use", use_cmd))  # deep-link fallback
 
-    # Manager callbacks (panel + invite + pending + show users)
+    # Manager callbacks (panel + invite + pending + show/deactivate flow)
     app.add_handler(CallbackQueryHandler(manager_buttons, pattern=r"^mgr:"))
     # Join request approve/reject
     app.add_handler(CallbackQueryHandler(join_request_callback, pattern=r"^jr:(approve|reject):\d+$"))
