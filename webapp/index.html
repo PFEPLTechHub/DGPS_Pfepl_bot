@@ -1,128 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Daily Drone Report (Preview-first)</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta charset="UTF-8">
+  <title>Drone Flight Data Entry</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
   <script src="https://telegram.org/js/telegram-web-app.js"></script>
   <style>
-    :root { --bg:#f7f7f8; --card:#fff; --muted:#666; --line:#e5e7eb; --accent:#2a7ade; }
-    body { font-family: system-ui, Arial, sans-serif; margin: 16px; background: var(--bg); }
-    h2,h3 { margin: 0 0 12px; }
-    .card { background: var(--card); border-radius: 12px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); }
-    label { display: block; font-weight: 600; margin-top: 10px; }
-    input, select, textarea { width: 100%; padding: 8px; margin-top: 6px; border: 1px solid #ddd; border-radius: 8px; }
-    button { padding: 10px 14px; border: 0; border-radius: 8px; background: var(--accent); color: #fff; font-weight: 600; cursor: pointer; }
-    button.link { background: #666; }
-    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-    .flex { display: flex; gap: 8px; align-items: center; }
-    .right { margin-left: auto; }
-    .muted { color: var(--muted); font-size: 12px; }
-    .flight { border: 1px dashed #cfd8dc; padding: 10px; border-radius: 8px; margin-top: 8px; }
+    body { font-family: Arial, sans-serif; margin: 16px; background: #f5f5f5; }
+    h2 { color: #333; margin: 0 0 12px; }
+    label { display: block; margin-top: 10px; font-weight: bold; }
+    input, select, textarea {
+      width: 100%; max-width: 360px; padding: 8px; margin-top: 4px;
+      border: 1px solid #ddd; border-radius: 6px; box-sizing: border-box;
+      background: #fff;
+    }
+    .flight-section {
+      border: 1px solid #ccc; padding: 12px; margin: 10px 0; background: #fff; border-radius: 6px;
+    }
+    .totals {
+      background: #e6f7ff; padding: 10px; margin-top: 15px; border-radius: 6px; max-width: 360px;
+    }
+    button {
+      margin-top: 16px; padding: 10px 16px; background: #007bff; border: none;
+      color: #fff; font-size: 15px; border-radius: 6px; cursor: pointer;
+    }
+    button:hover { background: #0056b3; }
+    .muted { color: #666; font-size: 12px; margin-top: 2px; max-width: 360px; }
     .error { color: #b00020; font-size: 12px; margin-top: 4px; }
+    .card { background: #fff; border-radius: 10px; padding: 12px; box-shadow: 0 1px 3px rgba(0,0,0,.06); max-width: 420px; }
     .hidden { display: none; }
-    .divider { height:1px; background:var(--line); margin:8px 0; }
-    .mono { font-family: ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; }
+    .divider { height: 1px; background: #e5e7eb; margin: 14px 0; }
+    .preview-list { list-style: none; padding: 0; margin: 0; }
+    .preview-list li { margin: 6px 0; }
+    table { border-collapse: collapse; width: 100%; max-width: 420px; }
+    th, td { border: 1px solid #ddd; padding: 6px; text-align: left; }
+    th { background: #f0f4ff; }
+    .actions { display: flex; gap: 8px; }
+    .link { background: #666; }
   </style>
 </head>
 <body>
-  <h2>Daily Drone Report</h2>
+  <h2>Drone Flight Data Entry</h2>
 
   <!-- FORM -->
-  <div id="form_card" class="card">
-    <div class="row">
-      <div>
-        <label>Date</label>
-        <input type="date" id="report_date" />
-        <div class="error" id="err_report_date"></div>
-      </div>
-      <div>
-        <label>Base Height (m)</label>
-        <input type="number" id="base_height_m" min="0" step="0.01" />
-        <div class="error" id="err_base_height_m"></div>
-      </div>
-    </div>
+  <div id="formCard" class="card">
+    <!-- Site Name -->
+    <label>Site Name:</label>
+    <select id="siteName">
+      <option value="">-- Select Site --</option>
+    </select>
+    <div class="error" id="err_siteName"></div>
 
-    <div class="row">
-      <div>
-        <label>Site</label>
-        <select id="site_id"></select>
-        <div class="error" id="err_site_id"></div>
-      </div>
-      <div>
-        <label>Drone</label>
-        <select id="drone_id"></select>
-        <div class="error" id="err_drone_id"></div>
-      </div>
-    </div>
+    <!-- Date -->
+    <label>Date:</label>
+    <input type="date" id="date">
+    <div class="error" id="err_date"></div>
 
-    <div class="row">
-      <div>
-        <label>Pilot</label>
-        <input type="text" id="pilot_name" placeholder="Pilot Name" />
-        <div class="error" id="err_pilot_name"></div>
-      </div>
-      <div>
-        <label>Copilot</label>
-        <input type="text" id="copilot_name" placeholder="Copilot Name" />
-        <div class="error" id="err_copilot_name"></div>
-      </div>
-    </div>
+    <!-- Drone used -->
+    <label>Drone Used:</label>
+    <select id="droneUsed">
+      <option value="">-- Select Drone --</option>
+    </select>
+    <div class="error" id="err_droneUsed"></div>
 
-    <label>DGPS Used (comma-separated)</label>
-    <input type="text" id="dgps_used" placeholder="R4S - 314,DA2 - 739" />
-    <div class="muted">Use commas only. "A B" is invalid; "A,B" is valid.</div>
-    <div class="error" id="err_dgps_used"></div>
+    <!-- DGPS Used -->
+    <label>DGPS Used:</label>
+    <div class="muted">If multiple entries, separate them by <b>commas only</b>. (No spaces as separators)</div>
+    <input type="text" id="dgpsUsed" placeholder="e.g. R4S - 314,DA2 - 739">
+    <div class="error" id="err_dgpsUsed"></div>
 
-    <label>DGPS Operators (comma-separated)</label>
-    <input type="text" id="dgps_ops" placeholder="Alice,Bob" />
-    <div class="muted">Use commas only. "Alice Bob" is invalid; "Alice,Bob" is valid.</div>
-    <div class="error" id="err_dgps_ops"></div>
+    <!-- DGPS Operators -->
+    <label>Name of DGPS Operators:</label>
+    <div class="muted">If multiple entries, separate them by <b>commas only</b>.</div>
+    <input type="text" id="dgpsOperators" placeholder="e.g. Alice,Bob">
+    <div class="error" id="err_dgpsOperators"></div>
 
-    <label>Grid Numbers / Block (comma-separated)</label>
-    <input type="text" id="grid_numbers" placeholder="H43R12A17,H43R12A22" />
-    <div class="muted">Use commas only. No spaces as separators.</div>
-    <div class="error" id="err_grid_numbers"></div>
+    <!-- Pilot / Copilot -->
+    <label>Name of Pilot:</label>
+    <input type="text" id="pilotName" placeholder="Enter Pilot Name">
+    <div class="error" id="err_pilotName"></div>
 
-    <label>GCP Points Covered (comma-separated)</label>
-    <input type="text" id="gcp_points" placeholder="CP1,CP2,CK1,CK2" />
-    <div class="muted">Use commas only. No spaces as separators.</div>
-    <div class="error" id="err_gcp_points"></div>
+    <label>Name of Copilot:</label>
+    <input type="text" id="copilotName" placeholder="Enter Copilot Name">
+    <div class="error" id="err_copilotName"></div>
 
-    <div class="divider"></div>
+    <!-- Number of Flights -->
+    <label>No of Flights:</label>
+    <select id="noOfFlights">
+      <option value="">-- Select --</option>
+      <option value="1">1</option><option value="2">2</option><option value="3">3</option>
+      <option value="4">4</option><option value="5">5</option><option value="6">6</option>
+      <option value="7">7</option><option value="8">8</option><option value="9">9</option>
+      <option value="10">10</option>
+    </select>
+    <div class="error" id="err_noOfFlights"></div>
 
-    <div class="flex">
-      <h3 style="margin:0">Flights</h3>
-      <button class="right" id="btn_add_flight">+ Add Flight</button>
-    </div>
-    <div id="flights"></div>
+    <!-- Flight Details -->
+    <div id="flightsContainer"></div>
     <div class="error" id="err_flights"></div>
 
-    <div class="divider"></div>
+    <!-- Grid Numbers -->
+    <label>Grid Numbers / Block Number:</label>
+    <div class="muted">If multiple entries, separate them by <b>commas only</b>.</div>
+    <input type="text" id="gridNumbers" placeholder="e.g. H43R12A17,H43R12A22">
+    <div class="error" id="err_gridNumbers"></div>
 
-    <label>Remark</label>
-    <textarea id="remark" rows="3" placeholder="Short remark"></textarea>
+    <!-- GCP Points Covered -->
+    <label>GCP Points Covered:</label>
+    <div class="muted">If multiple entries, separate them by <b>commas only</b>.</div>
+    <input type="text" id="gcpPoints" placeholder="e.g. CP1,CP2,CK1,CK2">
+    <div class="error" id="err_gcpPoints"></div>
+
+    <!-- Base Height (m) — move near the end as requested -->
+    <label>Base Height (Mtr):</label>
+    <input type="number" id="baseHeight" min="0" step="0.01">
+    <div class="error" id="err_baseHeight"></div>
+
+    <!-- Totals -->
+    <div class="totals">
+      <label>Total Area Covered (Sq km):</label>
+      <input type="number" id="totalArea" readonly>
+      <label>Total Flight Time (Min):</label>
+      <input type="number" id="totalTime" readonly>
+    </div>
+
+    <!-- Remark -->
+    <label>Remark:</label>
+    <textarea id="remark" rows="3"></textarea>
     <div class="error" id="err_remark"></div>
 
-    <div class="divider"></div>
-
-    <div class="flex">
-      <button id="btn_preview">Preview</button>
-      <button class="link right" id="btn_close">Close</button>
+    <div class="actions">
+      <button id="btnPreview">Preview</button>
+      <button class="link" id="btnClose">Close</button>
     </div>
   </div>
 
   <!-- PREVIEW -->
-  <div id="preview_card" class="card hidden">
-    <h3>Preview</h3>
-    <div id="preview_content" class="mono"></div>
+  <div id="previewCard" class="card hidden">
+    <h3 style="margin:0 0 10px;">Preview</h3>
+    <ul class="preview-list" id="previewList"></ul>
+
     <div class="divider"></div>
-    <div class="flex">
-      <button id="btn_confirm">Confirm & Send</button>
-      <button class="link right" id="btn_edit">Edit</button>
+    <h4 style="margin:0 0 6px;">Flights</h4>
+    <table id="flightsTable">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Time (min)</th>
+          <th>Area (sq km)</th>
+          <th>UBX</th>
+          <th>Base File</th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="divider"></div>
+    <div class="totals">
+      <div><b>Total Time:</b> <span id="prevTotalTime">0</span> min</div>
+      <div><b>Total Area:</b> <span id="prevTotalArea">0</span> sq km</div>
     </div>
-    <div class="muted" style="margin-top:8px;">
-      * Submission endpoint is disabled in this phase. This is a preview-only demo.
+
+    <div class="actions">
+      <button id="btnConfirm">Confirm & Submit</button>
+      <button class="link" id="btnEdit">Edit</button>
     </div>
   </div>
 
@@ -130,237 +171,276 @@
     const tg = window.Telegram?.WebApp;
     tg?.expand();
 
-    // ---- VERIFY SESSION (only employees can proceed) ----
-    async function verifySession() {
-      const initData = tg?.initData || '';
-      const res = await fetch('/api/verify', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({ init_data: initData })
-      });
-      if (!res.ok) {
-        const d = await res.json().catch(()=>({detail:'verify failed'}));
-        alert('Access denied: ' + (d.detail || 'verify failed'));
-        tg?.close();
-        throw new Error('verify failed');
-      }
-      return res.json();
+    // --- Helpers ---
+    function setErr(id, msg){ document.getElementById(id).textContent = msg || ''; }
+    function clearErrors(){
+      ['err_siteName','err_date','err_droneUsed','err_dgpsUsed','err_dgpsOperators',
+       'err_pilotName','err_copilotName','err_noOfFlights','err_flights',
+       'err_gridNumbers','err_gcpPoints','err_baseHeight','err_remark']
+       .forEach(id => setErr(id,''));
     }
 
-    // ---- Masters ----
-    async function loadMasters() {
-      const res = await fetch('/api/masters');
-      const data = await res.json();
-      if (!data.ok) { throw new Error('Failed to load masters'); }
-      fillSelect(document.getElementById('site_id'), data.sites);
-      fillSelect(document.getElementById('drone_id'), data.drones);
-    }
-
-    function fillSelect(sel, items) {
-      sel.innerHTML = '';
-      const opt0 = document.createElement('option');
-      opt0.value = '';
-      opt0.textContent = '-- Select --';
-      sel.appendChild(opt0);
-      (items || []).forEach(i => {
-        const o = document.createElement('option');
-        o.value = i.id;
-        o.textContent = i.name;
-        sel.appendChild(o);
-      });
-    }
-
-    // ---- Flights UI ----
-    function addFlightRow() {
-      const wrap = document.getElementById('flights');
-      const div = document.createElement('div');
-      div.className = 'flight';
-      div.innerHTML = `
-        <div class="row">
-          <div>
-            <label>Flight Time (min)</label>
-            <input type="number" class="f_time" min="1" step="1" />
-          </div>
-          <div>
-            <label>Area (sq km)</label>
-            <input type="number" class="f_area" min="0.001" step="0.001" />
-          </div>
-        </div>
-        <label>UAV Rover File (UBX No)</label>
-        <input type="text" class="f_ubx" placeholder="UBX..." />
-        <label>Drone Base File No</label>
-        <input type="text" class="f_base" placeholder="Base file..." />
-        <div class="flex" style="margin-top:8px;">
-          <span class="muted">Flight</span>
-          <button class="link right" onclick="this.closest('.flight').remove();">Remove</button>
-        </div>
-      `;
-      wrap.appendChild(div);
-    }
-
-    document.getElementById('btn_add_flight').addEventListener('click', addFlightRow);
-    document.getElementById('btn_close').addEventListener('click', () => tg?.close());
-
-    // ---- Validators ----
-    function requireValue(id) {
-      const v = document.getElementById(id).value.trim();
-      return v.length ? null : 'Required';
-    }
-    function requireNumber(id, minVal) {
-      const v = Number(document.getElementById(id).value);
-      if (isNaN(v)) return 'Required number';
-      if (v < minVal) return `Must be ≥ ${minVal}`;
-      return null;
-    }
-    // Comma-only list: if multiple tokens are present but **no comma**, error.
-    function parseCommaListStrict(id) {
-      const raw = document.getElementById(id).value.trim();
+    function parseCommaListStrict(value){
+      const raw = value.trim();
       if (!raw) return { list: [], error: 'Required' };
-      const hasComma = raw.includes(',');
-      const spaceTokens = raw.trim().split(/\s+/).filter(Boolean);
-      if (spaceTokens.length > 1 && !hasComma) {
+      // If there are multiple space-separated tokens and no comma => error
+      const spaceTokens = raw.split(/\s+/).filter(Boolean);
+      if (spaceTokens.length > 1 && !raw.includes(',')) {
         return { list: [], error: 'Use commas to separate values (no spaces as separators)' };
       }
       const list = raw.split(',').map(s => s.trim()).filter(Boolean);
       if (list.length === 0) return { list: [], error: 'At least one value required' };
       return { list, error: null };
     }
-    function validateFlights() {
-      const flights = Array.from(document.querySelectorAll('.flight')).map(div => ({
-        t: Number(div.querySelector('.f_time').value),
-        a: Number(div.querySelector('.f_area').value),
-        u: div.querySelector('.f_ubx').value.trim(),
-        b: div.querySelector('.f_base').value.trim()
-      }));
-      if (flights.length === 0) return { flights: [], error: 'Add at least one flight' };
-      for (const f of flights) {
-        if (!f.t || f.t < 1) return { flights: [], error: 'Each flight time must be ≥ 1' };
-        if (!f.a || f.a <= 0) return { flights: [], error: 'Each area must be > 0' };
-        if (!f.u) return { flights: [], error: 'UAV Rover File required' };
-        if (!f.b) return { flights: [], error: 'Drone Base File No required' };
+
+    function updateTotals() {
+      let totalTime = 0, totalArea = 0;
+      document.querySelectorAll(".flightTime").forEach(input => {
+        totalTime += Number(input.value) || 0;
+      });
+      document.querySelectorAll(".flightArea").forEach(input => {
+        totalArea += Number(input.value) || 0;
+      });
+      document.getElementById("totalTime").value = totalTime;
+      document.getElementById("totalArea").value = totalArea.toFixed(3);
+    }
+
+    function generateFlights(){
+      const count = Number(document.getElementById("noOfFlights").value);
+      const container = document.getElementById("flightsContainer");
+      container.innerHTML = "";
+      if (!count) return;
+
+      for (let i=1; i<=count; i++){
+        const div = document.createElement("div");
+        div.className = "flight-section";
+        div.innerHTML = `
+          <h3 style="margin:0 0 8px;">Flight ${i}</h3>
+          <label>Flight Time (Min):</label>
+          <input type="number" class="flightTime" min="1" step="1" oninput="updateTotals()">
+
+          <label>Area Covered (Sq km):</label>
+          <input type="number" class="flightArea" min="0.001" step="0.001" oninput="updateTotals()">
+
+          <label>UAV Rover File (UBX No):</label>
+          <input type="text" class="flightUbx" placeholder="UBX...">
+
+          <label>Drone Base File No:</label>
+          <input type="text" class="flightBase" placeholder="Base file...">
+        `;
+        container.appendChild(div);
       }
-      return { flights, error: null };
+      updateTotals();
     }
 
-    function setErr(id, msg) {
-      document.getElementById(id).textContent = msg || '';
+    // --- Masters (sites & drones) ---
+    async function loadMasters(){
+      const res = await fetch('/api/masters');
+      const data = await res.json();
+      const siteSel = document.getElementById('siteName');
+      const droneSel = document.getElementById('droneUsed');
+      // fill
+      (data.sites || []).forEach(s => {
+        const o = document.createElement('option');
+        o.value = s.id; o.textContent = s.name;
+        siteSel.appendChild(o);
+      });
+      (data.drones || []).forEach(d => {
+        const o = document.createElement('option');
+        o.value = d.id; o.textContent = d.name;
+        droneSel.appendChild(o);
+      });
     }
 
-    function collectAndValidate() {
-      // clear errors
-      ['err_report_date','err_base_height_m','err_site_id','err_drone_id','err_pilot_name','err_copilot_name',
-       'err_dgps_used','err_dgps_ops','err_grid_numbers','err_gcp_points','err_flights','err_remark']
-       .forEach(id => setErr(id, ''));
+    // --- Verify session (blocks non-employees) ---
+    async function verifySession(){
+      const initData = tg?.initData || '';
+      const res = await fetch('/api/verify', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ init_data: initData })
+      });
+      if (!res.ok){
+        const d = await res.json().catch(()=>({detail:'verify failed'}));
+        alert('Access denied: ' + (d.detail || 'verify failed')); tg?.close(); throw new Error('verify failed');
+      }
+      return res.json();
+    }
 
-      const e = {};
-      e.report_date = requireValue('report_date');
-      e.base_height_m = requireNumber('base_height_m', 0);
-      e.site_id = requireValue('site_id');
-      e.drone_id = requireValue('drone_id');
-      e.pilot_name = requireValue('pilot_name');
-      e.copilot_name = requireValue('copilot_name');
+    // --- Collect & validate ---
+    function collectAndValidate(){
+      clearErrors();
+      const siteId = document.getElementById('siteName').value.trim();
+      const date   = document.getElementById('date').value.trim();
+      const droneId= document.getElementById('droneUsed').value.trim();
+      const dgpsU  = document.getElementById('dgpsUsed').value;
+      const dgpsO  = document.getElementById('dgpsOperators').value;
+      const pilot  = document.getElementById('pilotName').value.trim();
+      const copilot= document.getElementById('copilotName').value.trim();
+      const nFlights = document.getElementById('noOfFlights').value.trim();
+      const grids  = document.getElementById('gridNumbers').value;
+      const gcps   = document.getElementById('gcpPoints').value;
+      const baseH  = document.getElementById('baseHeight').value.trim();
+      const remark = document.getElementById('remark').value.trim();
 
-      const dgps_used = parseCommaListStrict('dgps_used');
-      const dgps_ops  = parseCommaListStrict('dgps_ops');
-      const grids     = parseCommaListStrict('grid_numbers');
-      const gcps      = parseCommaListStrict('gcp_points');
+      if (!siteId) setErr('err_siteName','Required');
+      if (!date) setErr('err_date','Required');
+      if (!droneId) setErr('err_droneUsed','Required');
 
-      const flights   = validateFlights();
+      const dgpsUsed = parseCommaListStrict(dgpsU);
+      const dgpsOps  = parseCommaListStrict(dgpsO);
+      const gridNums = parseCommaListStrict(grids);
+      const gcpPts   = parseCommaListStrict(gcps);
 
-      const remark = requireValue('remark');
+      if (!pilot) setErr('err_pilotName','Required');
+      if (!copilot) setErr('err_copilotName','Required');
+      if (!nFlights) setErr('err_noOfFlights','Required');
+      if (!baseH) setErr('err_baseHeight','Required');
+      if (!remark) setErr('err_remark','Required');
 
-      // Show errors
-      setErr('err_report_date', e.report_date);
-      setErr('err_base_height_m', e.base_height_m);
-      setErr('err_site_id', e.site_id);
-      setErr('err_drone_id', e.drone_id);
-      setErr('err_pilot_name', e.pilot_name);
-      setErr('err_copilot_name', e.copilot_name);
-      setErr('err_dgps_used', dgps_used.error);
-      setErr('err_dgps_ops', dgps_ops.error);
-      setErr('err_grid_numbers', grids.error);
-      setErr('err_gcp_points', gcps.error);
-      setErr('err_flights', flights.error);
-      setErr('err_remark', remark);
+      // Flights
+      const sections = Array.from(document.querySelectorAll('.flight-section'));
+      let flights = [];
+      let flightsError = null;
+      if (sections.length === 0){
+        flightsError = 'Add number of flights';
+      } else {
+        for (let i=0;i<sections.length;i++){
+          const sec = sections[i];
+          const t = Number(sec.querySelector('.flightTime').value);
+          const a = Number(sec.querySelector('.flightArea').value);
+          const u = sec.querySelector('.flightUbx').value.trim();
+          const b = sec.querySelector('.flightBase').value.trim();
+          if (!t || t < 1){ flightsError = `Flight ${i+1}: time must be ≥ 1`; break; }
+          if (!a || a <= 0){ flightsError = `Flight ${i+1}: area must be > 0`; break; }
+          if (!u){ flightsError = `Flight ${i+1}: UBX required`; break; }
+          if (!b){ flightsError = `Flight ${i+1}: Base file required`; break; }
+          flights.push({ flight_time_min: t, area_sq_km: a, uav_rover_file: u, drone_base_file_no: b });
+        }
+      }
+      if (flightsError) setErr('err_flights', flightsError);
 
-      const anyErr = [
-        e.report_date, e.base_height_m, e.site_id, e.drone_id, e.pilot_name, e.copilot_name,
-        dgps_used.error, dgps_ops.error, grids.error, gcps.error, flights.error, remark
-      ].some(Boolean);
+      const anyErr = (
+        !siteId || !date || !droneId || !pilot || !copilot || !nFlights || !baseH || !remark ||
+        dgpsUsed.error || dgpsOps.error || gridNums.error || gcpPts.error || flightsError
+      );
+      if (anyErr) return { ok:false };
 
-      if (anyErr) return { ok: false };
-
-      // Build payload
-      const payload = {
-        report_date: document.getElementById('report_date').value,
-        site_id: Number(document.getElementById('site_id').value),
-        drone_id: Number(document.getElementById('drone_id').value),
-        base_height_m: Number(document.getElementById('base_height_m').value),
-        pilot_name: document.getElementById('pilot_name').value.trim(),
-        copilot_name: document.getElementById('copilot_name').value.trim(),
-        dgps_used: dgps_used.list,
-        dgps_operators: dgps_ops.list,
-        grid_numbers: grids.list,
-        gcp_points: gcps.list,
-        remark: document.getElementById('remark').value.trim(),
-        flights: flights.flights
+      return {
+        ok: true,
+        report: {
+          report_date: date,
+          site_id: Number(siteId),
+          drone_id: Number(droneId),
+          base_height_m: Number(baseH),
+          pilot_name: pilot,
+          copilot_name: copilot,
+          dgps_used: dgpsUsed.list,
+          dgps_operators: dgpsOps.list,
+          grid_numbers: gridNums.list,
+          gcp_points: gcpPts.list,
+          remark
+        },
+        flights
       };
-      return { ok: true, payload };
     }
 
-    // ---- Preview flow ----
-    function showPreview(payload) {
-      const el = document.getElementById('preview_content');
-      const totals = payload.flights.reduce((acc, f) => {
-        acc.time += (Number(f.flight_time_min || f.t) || 0);
-        acc.area += (Number(f.area_sq_km || f.a) || 0);
-        return acc;
-      }, {time:0, area:0});
-
-      const pretty = {
-        ...payload,
-        flights: payload.flights.map(f => ({
-          flight_time_min: f.flight_time_min ?? f.t,
-          area_sq_km: f.area_sq_km ?? f.a,
-          uav_rover_file: f.uav_rover_file ?? f.u,
-          drone_base_file_no: f.drone_base_file_no ?? f.b
-        })),
-        totals: { total_time_min: totals.time, total_area_sq_km: Number(totals.area.toFixed(3)) }
+    // --- Preview ---
+    function showPreview(bundle){
+      // Fill top list
+      const L = document.getElementById('previewList');
+      const r = bundle.report;
+      L.innerHTML = '';
+      const addLi = (label, value) => {
+        const li = document.createElement('li');
+        li.innerHTML = `<b>${label}:</b> ${value}`;
+        L.appendChild(li);
       };
+      // find selected text for site & drone
+      const siteTxt = document.querySelector('#siteName option:checked')?.textContent || r.site_id;
+      const droneTxt= document.querySelector('#droneUsed option:checked')?.textContent || r.drone_id;
 
-      el.textContent = JSON.stringify(pretty, null, 2);
+      addLi('Date', r.report_date);
+      addLi('Site Name', siteTxt);
+      addLi('Drone Used', droneTxt);
+      addLi('DGPS Used', r.dgps_used.join(', '));
+      addLi('DGPS Operators', r.dgps_operators.join(', '));
+      addLi('Pilot', r.pilot_name);
+      addLi('Copilot', r.copilot_name);
+      addLi('Grid Numbers', r.grid_numbers.join(', '));
+      addLi('GCP Points', r.gcp_points.join(', '));
+      addLi('Base Height (m)', r.base_height_m);
+      addLi('Remark', r.remark);
 
-      document.getElementById('form_card').classList.add('hidden');
-      document.getElementById('preview_card').classList.remove('hidden');
+      // Flights table
+      const TB = document.querySelector('#flightsTable tbody');
+      TB.innerHTML = '';
+      let totalTime = 0, totalArea = 0;
+      bundle.flights.forEach((f, idx) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>${idx+1}</td>
+          <td>${f.flight_time_min}</td>
+          <td>${Number(f.area_sq_km).toFixed(3)}</td>
+          <td>${f.uav_rover_file}</td>
+          <td>${f.drone_base_file_no}</td>
+        `;
+        TB.appendChild(tr);
+        totalTime += Number(f.flight_time_min) || 0;
+        totalArea += Number(f.area_sq_km) || 0;
+      });
+      document.getElementById('prevTotalTime').textContent = totalTime;
+      document.getElementById('prevTotalArea').textContent = totalArea.toFixed(3);
+
+      // Toggle
+      document.getElementById('formCard').classList.add('hidden');
+      document.getElementById('previewCard').classList.remove('hidden');
     }
 
-    document.getElementById('btn_preview').addEventListener('click', () => {
-      const v = collectAndValidate();
-      if (!v.ok) return;
-      showPreview(v.payload);
+    // --- Submit ---
+    async function submitBundle(bundle){
+      const initData = tg?.initData || '';
+      const res = await fetch('/api/reports', {
+        method: 'POST',
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ init_data: initData, report: bundle.report, flights: bundle.flights })
+      });
+      if (!res.ok){
+        const d = await res.json().catch(()=>({detail:'submit failed'}));
+        throw new Error(d.detail || 'Submit failed');
+      }
+      return res.json();
+    }
+
+    // --- Wire up ---
+    document.getElementById('noOfFlights').addEventListener('change', generateFlights);
+    document.getElementById('btnClose').addEventListener('click', ()=> tg?.close());
+    document.getElementById('btnPreview').addEventListener('click', ()=>{
+      const v = collectAndValidate(); if (!v.ok) return; showPreview(v);
+    });
+    document.getElementById('btnEdit').addEventListener('click', ()=>{
+      document.getElementById('previewCard').classList.add('hidden');
+      document.getElementById('formCard').classList.remove('hidden');
+    });
+    document.getElementById('btnConfirm').addEventListener('click', async ()=>{
+      try{
+        const v = collectAndValidate(); if (!v.ok) { alert('Form has errors.'); return; }
+        await submitBundle(v);
+        alert('Report submitted successfully!');
+        tg?.close();
+      }catch(e){
+        alert(e.message || 'Submit failed');
+      }
     });
 
-    document.getElementById('btn_edit').addEventListener('click', () => {
-      document.getElementById('preview_card').classList.add('hidden');
-      document.getElementById('form_card').classList.remove('hidden');
-    });
-
-    document.getElementById('btn_confirm').addEventListener('click', async () => {
-      // No create endpoint in this phase
-      alert('Submission endpoint is disabled for now. (Preview-only mode)');
-      // tg?.close(); // Uncomment when you want to close after preview
-    });
-
-    // ---- Init ----
-    (async function init() {
+    // --- Init ---
+    (async function init(){
+      // default date
+      document.getElementById('date').value = new Date().toISOString().slice(0,10);
+      // verify & load masters
       try {
-        // default date & one flight row
-        document.getElementById('report_date').value = new Date().toISOString().slice(0,10);
-        addFlightRow();
-
-        await verifySession(); // gates non-employees
+        await verifySession();
         await loadMasters();
-      } catch (e) {
+      } catch(e) {
         console.error(e);
       }
     })();

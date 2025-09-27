@@ -13,6 +13,7 @@ from telegram import (
     Update,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
+    WebAppInfo,
 )
 from telegram.ext import (
     ApplicationBuilder,
@@ -36,14 +37,18 @@ logger = logging.getLogger("staffbot")
 
 # ----------------- Load config -----------------
 load_dotenv()
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+BOT_TOKEN    = os.getenv("BOT_TOKEN")
 BOT_USERNAME = os.getenv("BOT_USERNAME")  # without '@'
+
 MYSQL_HOST = os.getenv("MYSQL_HOST", "127.0.0.1")
 MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
-MYSQL_DB = os.getenv("MYSQL_DB", "tg_staffbot")
+MYSQL_DB   = os.getenv("MYSQL_DB", "tg_staffbot")
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASS = os.getenv("MYSQL_PASS", "")
+
 INVITE_DAYS_VALID = int(os.getenv("INVITE_DAYS_VALID", "1"))  # invitation lifetime (days)
+WEBAPP_URL        = os.getenv("WEBAPP_URL", "").strip()       # <- your port-forwarded https URL to /webapp
+WEBAPP_URL = os.getenv("WEBAPP_URL", "https://mzknxfbr-8000.inc1.devtunnels.ms/webapp/index.html")
 
 # Timezones
 UTC = timezone.utc
@@ -258,14 +263,14 @@ def render_main_menu(telegram_id: int):
     if not u:
         text = (
             "Welcome! If you’re an employee, please join via your invite link.\n"
-            "If Start didn’t work, send your invite code using `/use <code>`."
+            "If Start didn’t work, send your invite code using /use <code>."
         )
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("ℹ️ Help", callback_data="main:help")]])
         return text, kb
 
     if u["is_active"] == 1 and u["role"] in (ROLE_ADMIN, ROLE_MANAGER):
         label = "Admin" if u["role"] == ROLE_ADMIN else "Manager"
-        text = f"👋 {label} menu — choose an option:"
+        text = f"{label} menu — choose an option:"
         kb = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("⚙️ Manage Users", callback_data="mgr:panel")],
@@ -275,7 +280,7 @@ def render_main_menu(telegram_id: int):
         return text, kb
 
     if u["is_active"] == 1 and u["role"] == ROLE_EMPLOYEE:
-        text = "👋 Employee menu — choose an option:"
+        text = "Employee menu — choose an option:"
         kb = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("📝 Submit Report", callback_data="emp:report")],
@@ -283,7 +288,7 @@ def render_main_menu(telegram_id: int):
             ]
         )
     else:
-        text = "⏳ Your account is pending manager approval."
+        text = "Your account is pending manager approval."
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("ℹ️ Help", callback_data="main:help")]])
     return text, kb
 
@@ -319,12 +324,12 @@ async def open_request_with_token(update: Update, context: ContextTypes.DEFAULT_
     try:
         inv = get_invitation(token)
         if not inv or inv["status"] not in ("pending",):
-            await reply_text_safe(update, context, "❌ Invalid or inactive invite. Ask your manager/admin for a new link.")
+            await reply_text_safe(update, context, "Invalid or inactive invite. Ask your manager/admin for a new link.")
             logger.warning("Invite invalid or inactive | token=%s", token)
             return
 
         if token_expired(inv):
-            msg = f"⌛ Invite expired (IST: {fmt_ist(inv['expires_at'].replace(tzinfo=UTC))}). Ask for a new link."
+            msg = f"Invite expired (IST: {fmt_ist(inv['expires_at'].replace(tzinfo=UTC))}). Ask for a new link."
             await reply_text_safe(update, context, msg)
             logger.info("Invite expired | token=%s expires_at=%s", token, inv["expires_at"])
             return
@@ -343,7 +348,7 @@ async def open_request_with_token(update: Update, context: ContextTypes.DEFAULT_
                 invitation_id=inv["id"],
             )
 
-        await reply_text_safe(update, context, "✅ Request sent. You’ll be notified when it’s approved.")
+        await reply_text_safe(update, context, "Request sent. You’ll be notified when it’s approved.")
 
         mgr_tg = get_telegram_id_by_user_row_id(inv["manager_id"])
         created_naive = get_join_request(jr_id)["created_at"]
@@ -357,14 +362,13 @@ async def open_request_with_token(update: Update, context: ContextTypes.DEFAULT_
                 [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
             ]
         )
-        label = "Join request"
         role_txt = "as MANAGER" if inv["invite_role"] == ROLE_MANAGER else "as EMPLOYEE"
         try:
             await safe_send_message(
                 context.bot,
                 chat_id=mgr_tg,
                 text=(
-                    f"👤 New {label} (#{jr_id}) {role_txt}\n"
+                    f"New join request (#{jr_id}) {role_txt}\n"
                     f"tg: {tg.id}  (@{tg.username or '-'})\n"
                     f"Requested: {fmt_ist(created_naive.replace(tzinfo=UTC))}\n"
                     f"Expires: {fmt_ist(deadline)} ({human_left(deadline)})"
@@ -377,12 +381,11 @@ async def open_request_with_token(update: Update, context: ContextTypes.DEFAULT_
 
     except Exception as e:
         logger.exception("open_request_with_token failed | token=%s error=%s", token, e)
-        if isinstance(update, Update) and update.effective_chat:
-            try:
-                await safe_send_message(context.bot, chat_id=update.effective_chat.id,
-                                        text="⚠️ Something went wrong. Please try again.")
-            except Exception:
-                pass
+        try:
+            await safe_send_message(context.bot, chat_id=update.effective_chat.id,
+                                    text="Something went wrong. Please try again.")
+        except Exception:
+            pass
 
 # ----------------- Handlers -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -401,18 +404,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         msg = (
             "Hi! To join as an employee/manager, please use your invite link.\n\n"
             "If Start didn’t ask you, send your invite code using:\n"
-            "`/use <paste-your-code>`"
+            "/use <paste-your-code>"
         )
-        await reply_text_safe(update, context, msg, parse_mode="Markdown")
+        await reply_text_safe(update, context, msg)
 
 async def use_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await reply_text_safe(update, context, "Usage: `/use <invite-code>`", parse_mode="Markdown")
+        await reply_text_safe(update, context, "Usage: /use <invite-code>")
         return
     token = context.args[0].strip()
     logger.info("/use | user=%s token=%s", update.effective_user.id, token)
     if not UUID_RE.match(token):
-        await reply_text_safe(update, context, "❌ That doesn't look like a valid invite code.")
+        await reply_text_safe(update, context, "That doesn't look like a valid invite code.")
         return
     await open_request_with_token(update, context, token)
 
@@ -449,7 +452,7 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
     if not inv or token_expired(inv):
         update_join_request_status(jr_id, "rejected", decided_by=actor["id"])
         await query.edit_message_text(
-            "⛔ Invitation expired. Ask the user to use a fresh invite.",
+            "Invitation expired. Ask the user to use a fresh invite.",
             reply_markup=InlineKeyboardMarkup(
                 [
                     [InlineKeyboardButton("➕ New Invite", callback_data="mgr:invite")],
@@ -467,7 +470,7 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
             await safe_send_message(
                 context.bot,
                 chat_id=jr["telegram_id"],
-                text="✅ Your request has been approved. Please complete your profile to finish joining.",
+                text="Your request has been approved. Please complete your profile to finish joining.",
                 reply_markup=kb,
             )
             logger.info("Approval sent to user | jr_id=%s user_tg=%s", jr_id, jr["telegram_id"])
@@ -482,7 +485,7 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
         update_join_request_status(jr_id, "rejected", decided_by=actor["id"])
         try:
             await safe_send_message(context.bot, chat_id=jr["telegram_id"],
-                                    text="❌ Your join request was rejected.")
+                                    text="Your join request was rejected.")
             logger.info("Rejection sent to user | jr_id=%s user_tg=%s", jr_id, jr["telegram_id"])
         except Exception as e:
             logger.exception("Failed to notify user of rejection | jr_id=%s error=%s", jr_id, e)
@@ -493,9 +496,7 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 # -------- Profile flow (after approval) --------
 async def profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query()
-    # NOTE: in some ptb versions, query must be awaited via update.callback_query; but attribute access is fine:
-    query = update.callback_query
+    query = update.callback_query  # <- fixed (no call)
     await query.answer()
 
     _, _, jr_id_s = query.data.split(":")
@@ -509,40 +510,34 @@ async def profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("This profile link is not for you.")
         return ConversationHandler.END
 
-    # If already active, don't ask again
-    if user_active_by_tg(jr["telegram_id"]):
-        await query.edit_message_text("✅ Your profile is already completed.")
-        logger.info("Profile already completed | tg=%s jr_id=%s", jr["telegram_id"], jr_id)
-        return ConversationHandler.END
-
     # Ensure invitation still valid
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute("SELECT * FROM invitations WHERE id=%s", (jr["invitation_id"],))
         inv = cur.fetchone()
     if not inv or token_expired(inv):
-        await query.edit_message_text("⛔ The invite expired. Ask your manager/admin for a new one.")
+        await query.edit_message_text("The invite expired. Ask your manager/admin for a new one.")
         logger.info("Profile start failed due to expired invite | jr_id=%s", jr_id)
         return ConversationHandler.END
 
     context.user_data["profile_jr_id"] = jr_id
-    await query.edit_message_text("Your *first name*?", parse_mode="Markdown")
+    await query.edit_message_text("Your first name?")
     logger.info("Profile collection started | jr_id=%s", jr_id)
     return ASK_FIRST
 
 async def ask_first(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jr_id = context.user_data.get("profile_jr_id")
     if not jr_id:
-        await reply_text_safe(update, context, "Session expired. Tap the *Start Profile* button again.", parse_mode="Markdown")
+        await reply_text_safe(update, context, "Session expired. Tap the Start Profile button again.")
         return ConversationHandler.END
     first_name = (update.message.text or "").strip()[:100]
     set_join_profile_field(jr_id, "first_name", first_name)
-    await reply_text_safe(update, context, "Your *last name*?", parse_mode="Markdown")
+    await reply_text_safe(update, context, "Your last name?")
     return ASK_LAST
 
 async def ask_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jr_id = context.user_data.get("profile_jr_id")
     if not jr_id:
-        await reply_text_safe(update, context, "Session expired. Tap the *Start Profile* button again.", parse_mode="Markdown")
+        await reply_text_safe(update, context, "Session expired. Tap the Start Profile button again.")
         return ConversationHandler.END
     last_name = (update.message.text or "").strip()[:100]
     set_join_profile_field(jr_id, "last_name", last_name)
@@ -552,7 +547,7 @@ async def ask_last(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     jr_id = context.user_data.get("profile_jr_id")
     if not jr_id:
-        await reply_text_safe(update, context, "Session expired. Tap the *Start Profile* button again.", parse_mode="Markdown")
+        await reply_text_safe(update, context, "Session expired. Tap the Start Profile button again.")
         return ConversationHandler.END
 
     phone = "".join(ch for ch in (update.message.text or "") if ch.isdigit() or ch == "+")[:32]
@@ -592,12 +587,12 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         mark_invitation_used(jr["invitation_id"], user_id)
 
-        await reply_text_safe(update, context, "🎉 Your records have been inserted. You can use the bot now.")
+        await reply_text_safe(update, context, "Your records have been inserted. You can use the bot now.")
         context.user_data.clear()
         await show_main_menu_message(update, context)
     except Exception as e:
         logger.exception("Finalizing profile failed | jr_id=%s error=%s", jr_id, e)
-        await reply_text_safe(update, context, "⚠️ Something went wrong saving your profile. Please try again.")
+        await reply_text_safe(update, context, "Something went wrong saving your profile. Please try again.")
         context.user_data.clear()
     return ConversationHandler.END
 
@@ -659,7 +654,7 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         token, exp_utc = create_invitation(manager_id=actor["id"], invite_role=ROLE_EMPLOYEE)
         link = f"https://t.me/{BOT_USERNAME}?start={token}"
         text = (
-            "🔗 Share this invite with your employee:\n"
+            "Share this invite with your employee:\n"
             f"{link}\n\n"
             f"Expires (IST): {fmt_ist(exp_utc)}\n"
             f"Time left: {human_left(exp_utc)}\n\n"
@@ -683,7 +678,7 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         token, exp_utc = create_invitation(manager_id=actor["id"], invite_role=ROLE_MANAGER)
         link = f"https://t.me/{BOT_USERNAME}?start={token}"
         text = (
-            "🔗 Share this invite to add a *Manager*:\n"
+            "Share this invite to add a Manager:\n"
             f"{link}\n\n"
             f"Expires (IST): {fmt_ist(exp_utc)}\n"
             f"Time left: {human_left(exp_utc)}\n\n"
@@ -774,7 +769,7 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
 
         await query.edit_message_text(
-            "👥 Employees (latest 25):\n" + "\n".join(lines),
+            "Employees (latest 25):\n" + "\n".join(lines),
             reply_markup=InlineKeyboardMarkup(buttons),
         )
         return
@@ -827,7 +822,7 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _, _, uid = data.split(":")
         uid = int(uid)
         ok = deactivate_employee(uid, actor["id"])
-        msg = "✅ User deactivated." if ok else "⚠️ Could not deactivate (wrong manager or already inactive)."
+        msg = "User deactivated." if ok else "Could not deactivate (wrong manager or already inactive)."
         await query.edit_message_text(
             msg,
             reply_markup=InlineKeyboardMarkup(
@@ -854,10 +849,9 @@ async def main_menu_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE
     if data == "main:help":
         u = get_user_by_tg(update.effective_user.id)
         if u and u["is_active"] == 1 and u["role"] in (ROLE_ADMIN, ROLE_MANAGER):
-            who = "Admins/Managers"
             extra = "Admins can also invite managers."
             txt = (
-                f"Help for {who}:\n"
+                "Help for Admins/Managers:\n"
                 "• Create invites and approve within 24 hours.\n"
                 "• Approval asks the user to complete their profile.\n"
                 "• Employees submit daily reports which you review.\n"
@@ -867,21 +861,37 @@ async def main_menu_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE
             txt = (
                 "Help for Employees:\n"
                 "• This is a report bot.\n"
-                "• Use *Submit Report* to fill your daily report based on your work data.\n"
+                "• Use Submit Report to fill your daily report based on your work data.\n"
                 "• Your manager receives your report each day."
             )
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]])
-        await query.edit_message_text(txt, reply_markup=kb, parse_mode="Markdown")
+        await query.edit_message_text(txt, reply_markup=kb)
         return
 
     if data == "emp:report":
-        kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]])
+        # Only active employees get the WebApp button
+        u = get_user_by_tg(update.effective_user.id)
+        if not (u and u["is_active"] == 1 and u["role"] == ROLE_EMPLOYEE):
+            await query.edit_message_text("Only active employees can submit reports.",
+                                          reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]))
+            return
+
+        if not WEBAPP_URL or not WEBAPP_URL.startswith("http"):
+            await query.edit_message_text(
+                "WebApp URL not configured. Please contact your administrator.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]),
+            )
+            return
+
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("🔗 Open Report", web_app=WebAppInfo(url=WEBAPP_URL))],
+                [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")],
+            ]
+        )
         await query.edit_message_text(
-            "📝 This is a report bot.\n"
-            "Tap the report action to fill your **daily** report based on your work data. "
-            "Once submitted, your manager will receive it.",
+            "Tap to open the report WebApp and submit your daily report.",
             reply_markup=kb,
-            parse_mode="Markdown",
         )
         return
 
@@ -901,11 +911,11 @@ async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
         txt = (
             "Help for Employees:\n"
             "• This is a report bot.\n"
-            "• Use *Submit Report* to fill your daily report based on your work data.\n"
-            "• If your invite link's Start didn’t work, send `/use <code>`."
+            "• Use Submit Report to fill your daily report based on your work data.\n"
+            "• If your invite link's Start didn’t work, send /use <code>."
         )
     kb = InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]])
-    await reply_text_safe(update, context, txt, reply_markup=kb, parse_mode="Markdown")
+    await reply_text_safe(update, context, txt, reply_markup=kb)
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
@@ -916,7 +926,7 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
     logger.exception("Unhandled error | update=%s error=%s", update, context.error)
     try:
         if isinstance(update, Update) and update.effective_chat:
-            await safe_send_message(context.bot, chat_id=update.effective_chat.id, text="⚠️ An error occurred. Please try again.")
+            await safe_send_message(context.bot, chat_id=update.effective_chat.id, text="An error occurred. Please try again.")
     except Exception:
         pass
 
@@ -943,6 +953,7 @@ def main():
     app.add_handler(CallbackQueryHandler(manager_buttons, pattern=r"^mgr:"))
     # Join request approve/reject
     app.add_handler(CallbackQueryHandler(join_request_callback, pattern=r"^jr:(approve|reject):\d+$"))
+
     # Profile entry button (after approval)
     profile_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(profile_start, pattern=r"^prof:start:\d+$")],
@@ -958,7 +969,7 @@ def main():
     # Main menu callbacks (help/report/home)
     app.add_handler(CallbackQueryHandler(main_menu_callbacks, pattern=r"^(main:|emp:)"))
 
-    # Raw UUID pasted by a user
+    # Raw UUID pasted by a user OR any text → handle
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, detect_uuid_text))
 
     # Error handler
