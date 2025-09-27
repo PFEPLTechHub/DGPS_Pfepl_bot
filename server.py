@@ -174,8 +174,9 @@ async def create_report(req: Request):
       "init_data": "<tg webapp initData>",
       "report": {
         "report_date": "YYYY-MM-DD",
-        "site_id": 1,
-        "drone_id": 2,
+        -- Provide EITHER ids OR names for site/drone:
+        -- ids:   "site_id": 1, "drone_id": 2
+        -- names: "site_name": "Assam ...", "drone_name": "Q6_..."
         "base_height_m": 12.5,
         "pilot_name": "A",
         "copilot_name": "B",
@@ -202,17 +203,26 @@ async def create_report(req: Request):
     payload = body.get("report") or {}
     flights = body.get("flights") or []
 
-    # Basic validation
-    required_fields = [
-        "report_date", "site_id", "drone_id", "base_height_m",
-        "pilot_name", "copilot_name", "dgps_used", "dgps_operators",
+    # Basic validation (allow either ids OR names for site/drone)
+    required_base = [
+        "report_date", "base_height_m",
+        "pilot_name", "copilot_name",
+        "dgps_used", "dgps_operators",
         "grid_numbers", "gcp_points", "remark"
     ]
-    missing = [f for f in required_fields if f not in payload]
+    missing = [f for f in required_base if f not in payload]
     if missing:
         raise HTTPException(status_code=400, detail=f"Missing fields: {', '.join(missing)}")
+
+    has_ids = ("site_id" in payload and "drone_id" in payload)
+    has_names = ("site_name" in payload and "drone_name" in payload)
+    if not (has_ids or has_names):
+        raise HTTPException(status_code=400, detail="Provide site/drone by id or by name")
+
     if not isinstance(flights, list) or len(flights) == 0:
         raise HTTPException(status_code=400, detail="At least one flight required")
+    if len(flights) > 10:
+        raise HTTPException(status_code=400, detail="Flights cannot exceed 10")
 
     # Ensure user is active employee
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
@@ -221,54 +231,86 @@ async def create_report(req: Request):
     if not u or u["role"] != 2 or u["is_active"] != 1:
         raise HTTPException(status_code=403, detail="Only active employees can submit reports")
 
+    # Resolve site_name/drone_name if ids were sent
+    site_name = payload.get("site_name", "").strip()
+    drone_name = payload.get("drone_name", "").strip()
+    try:
+        if not site_name or not drone_name:
+            with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+                if not site_name and "site_id" in payload:
+                    cur.execute("SELECT name FROM master_sites WHERE id=%s", (int(payload["site_id"]),))
+                    r = cur.fetchone()
+                    if not r:
+                        raise HTTPException(status_code=400, detail="Invalid site_id")
+                    site_name = r["name"]
+                if not drone_name and "drone_id" in payload:
+                    cur.execute("SELECT name FROM master_drones WHERE id=%s", (int(payload["drone_id"]),))
+                    r = cur.fetchone()
+                    if not r:
+                        raise HTTPException(status_code=400, detail="Invalid drone_id")
+                    drone_name = r["name"]
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("masters lookup failed")
+        raise HTTPException(status_code=500, detail="Failed to resolve site/drone")
+
+    # Compute totals from flights (server-side truth)
+    total_time_min = 0
+    total_area_sq_km = 0.0
+    norm_flights = []
+    for f in flights:
+        t = int(f.get("flight_time_min", 0))
+        a = float(f.get("area_sq_km", 0.0))
+        ufile = (f.get("uav_rover_file") or "").strip()
+        bfile = (f.get("drone_base_file_no") or "").strip()
+        if t <= 0 or a <= 0 or not ufile or not bfile:
+            raise HTTPException(status_code=400, detail="Each flight needs time>0, area>0, UBX, Base File")
+        total_time_min += t
+        total_area_sq_km += a
+        norm_flights.append((t, a, ufile, bfile))
+
     # Insert
     try:
         with db_conn() as conn:
             conn.start_transaction()
             with conn.cursor() as cur:
-                # reports (NOTE: employee_telegram_id column name)
                 cur.execute(
                     """
                     INSERT INTO reports (
-                        employee_telegram_id, report_date, site_id, drone_id, base_height_m,
+                        employee_telegram_id, report_date,
+                        site_name, drone_name, base_height_m,
                         pilot_name, copilot_name,
                         dgps_used_json, dgps_operators_json, grid_numbers_json, gcp_points_json,
+                        total_area_sq_km, total_time_min,
                         remark
                     )
-                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                    VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
                     """,
                     (
                         tg_id,
                         payload["report_date"],
-                        int(payload["site_id"]),
-                        int(payload["drone_id"]),
-                        float(payload["base_height_m"]),
+                        site_name, drone_name, float(payload["base_height_m"]),
                         payload["pilot_name"].strip(),
                         payload["copilot_name"].strip(),
                         json.dumps(payload["dgps_used"], ensure_ascii=False),
                         json.dumps(payload["dgps_operators"], ensure_ascii=False),
                         json.dumps(payload["grid_numbers"], ensure_ascii=False),
                         json.dumps(payload["gcp_points"], ensure_ascii=False),
-                        payload["remark"].strip(),
+                        total_area_sq_km, total_time_min,
+                        (payload.get("remark") or "").strip(),
                     ),
                 )
                 report_id = cur.lastrowid
 
-                # report_flights
-                for f in flights:
+                for (t, a, ufile, bfile) in norm_flights:
                     cur.execute(
                         """
                         INSERT INTO report_flights
                         (report_id, flight_time_min, area_sq_km, uav_rover_file, drone_base_file_no)
                         VALUES (%s,%s,%s,%s,%s)
                         """,
-                        (
-                            report_id,
-                            int(f["flight_time_min"]),
-                            float(f["area_sq_km"]),
-                            f["uav_rover_file"].strip(),
-                            f["drone_base_file_no"].strip(),
-                        ),
+                        (report_id, t, a, ufile, bfile),
                     )
             conn.commit()
 

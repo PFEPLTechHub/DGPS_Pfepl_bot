@@ -7,7 +7,7 @@ import asyncio
 from datetime import datetime, timedelta, timezone
 
 from dotenv import load_dotenv
-from mysql.connector import pooling
+from mysql.connector import pooling, errors as mysql_errors
 
 from telegram import (
     Update,
@@ -46,9 +46,8 @@ MYSQL_DB   = os.getenv("MYSQL_DB", "tg_staffbot")
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASS = os.getenv("MYSQL_PASS", "")
 
-INVITE_DAYS_VALID = int(os.getenv("INVITE_DAYS_VALID", "1"))  # invitation lifetime (days)
-WEBAPP_URL        = os.getenv("WEBAPP_URL", "").strip()       # <- your port-forwarded https URL to /webapp
-WEBAPP_URL = os.getenv("WEBAPP_URL", "https://mzknxfbr-8000.inc1.devtunnels.ms/webapp/index.html")
+INVITE_DAYS_VALID = int(os.getenv("INVITE_DAYS_VALID", "1"))
+WEBAPP_URL        = os.getenv("WEBAPP_URL", "").strip()
 
 # Timezones
 UTC = timezone.utc
@@ -72,10 +71,11 @@ def db_conn():
 ROLE_ADMIN    = 0
 ROLE_MANAGER  = 1
 ROLE_EMPLOYEE = 2
-APPROVAL_WINDOW_HOURS = 24
 
-# Conversation states (post-approval profile)
+# Conversation states
 ASK_FIRST, ASK_LAST, ASK_PHONE = range(3)
+# Masters text-entry states
+MASTERS_ADD_NAME, MASTERS_RENAME_NAME = range(100, 102)
 
 # ----------------- DB helpers -----------------
 def get_user_by_tg(telegram_id):
@@ -138,7 +138,6 @@ def mark_invitation_used(inv_id, user_id):
             "UPDATE invitations SET status='used', used_at=UTC_TIMESTAMP(), redeemed_by_user_id=%s WHERE id=%s",
             (user_id, inv_id),
         )
-    logger.info("Invitation marked used | invitation_id=%s user_id=%s", inv_id, user_id)
 
 # ---- join_requests ----
 def find_pending_request(telegram_id, invitation_id):
@@ -158,12 +157,7 @@ def create_join_request_min(telegram_id, username, manager_id, invite_role, invi
             "VALUES (%s,%s,%s,%s,%s,'pending')",
             (telegram_id, username, manager_id, invite_role, invitation_id),
         )
-        jr_id = cur.lastrowid
-    logger.info(
-        "Join request created | jr_id=%s tg=%s manager_id=%s role=%s invitation_id=%s",
-        jr_id, telegram_id, manager_id, invite_role, invitation_id
-    )
-    return jr_id
+        return cur.lastrowid
 
 def get_join_request(jr_id):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
@@ -185,15 +179,12 @@ def update_join_request_status(jr_id, status, decided_by):
             "UPDATE join_requests SET status=%s, decided_at=UTC_TIMESTAMP(), decided_by=%s WHERE id=%s",
             (status, decided_by, jr_id),
         )
-    logger.info("Join request status updated | jr_id=%s status=%s decided_by=%s", jr_id, status, decided_by)
 
 def set_join_profile_field(jr_id, field, value):
     if field not in ("first_name", "last_name", "phone"):
-        logger.warning("Ignored setting invalid join_profile field | field=%s", field)
         return
     with db_conn() as conn, conn.cursor() as cur:
         cur.execute(f"UPDATE join_requests SET {field}=%s WHERE id=%s", (value, jr_id))
-    logger.info("Join request field set | jr_id=%s %s=%s", jr_id, field, value)
 
 # ---- employees list / deactivate ----
 def list_employees(manager_id, limit=25):
@@ -222,15 +213,59 @@ def deactivate_employee(user_id, manager_id):
             "UPDATE users SET is_active=0 WHERE id=%s AND role=%s AND manager_id=%s",
             (user_id, ROLE_EMPLOYEE, manager_id),
         )
-        changed = cur.rowcount > 0
-    logger.info("Deactivate employee | user_id=%s manager_id=%s success=%s", user_id, manager_id, changed)
-    return changed
+        return cur.rowcount > 0
 
 def get_telegram_id_by_user_row_id(row_id):
     with db_conn() as conn, conn.cursor() as cur:
         cur.execute("SELECT telegram_id FROM users WHERE id=%s", (row_id,))
         r = cur.fetchone()
         return r[0] if r else None
+
+# -------- Masters (Sites & Drones) helpers --------
+def _table_for(kind: str) -> str:
+    return "master_sites" if kind == "sites" else "master_drones"
+
+def _label_for(kind: str) -> str:
+    return "Site" if kind == "sites" else "Drone"
+
+def masters_list(kind: str):
+    table = _table_for(kind)
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute(f"SELECT id, name, is_active FROM {table} ORDER BY name")
+        return cur.fetchall()
+
+def masters_add(kind: str, name: str):
+    table = _table_for(kind)
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"INSERT INTO {table} (name, is_active) VALUES (%s, 1)", (name.strip(),))
+        return cur.lastrowid
+
+def masters_rename(kind: str, rec_id: int, new_name: str):
+    table = _table_for(kind)
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute(f"UPDATE {table} SET name=%s WHERE id=%s", (new_name.strip(), rec_id))
+        return cur.rowcount > 0
+
+def masters_toggle(kind: str, rec_id: int):
+    table = _table_for(kind)
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute(f"SELECT is_active FROM {table} WHERE id=%s", (rec_id,))
+        row = cur.fetchone()
+        if not row:
+            return False, None
+        new_val = 0 if row["is_active"] == 1 else 1
+        cur.execute(f"UPDATE {table} SET is_active=%s WHERE id=%s", (new_val, rec_id))
+        return True, new_val
+
+def masters_delete(kind: str, rec_id: int):
+    table = _table_for(kind)
+    with db_conn() as conn, conn.cursor() as cur:
+        try:
+            cur.execute(f"DELETE FROM {table} WHERE id=%s", (rec_id,))
+            return True, None
+        except mysql_errors.IntegrityError as e:
+            # In use by reports (FK restriction)
+            return False, e
 
 # ----------------- Network-safe sending helpers -----------------
 async def safe_send_message(bot, chat_id, text, retries=2, **kwargs):
@@ -253,8 +288,8 @@ async def reply_text_safe(update: Update, context: ContextTypes.DEFAULT_TYPE, te
     if update.message:
         try:
             return await update.message.reply_text(text, **kwargs)
-        except (RetryAfter, TimedOut, NetworkError) as e:
-            logger.warning("reply_text failed, falling back to send_message | err=%s", e)
+        except (RetryAfter, TimedOut, NetworkError):
+            pass
     return await safe_send_message(context.bot, update.effective_chat.id, text, **kwargs)
 
 # ----------------- UI helpers -----------------
@@ -274,6 +309,7 @@ def render_main_menu(telegram_id: int):
         kb = InlineKeyboardMarkup(
             [
                 [InlineKeyboardButton("⚙️ Manage Users", callback_data="mgr:panel")],
+                [InlineKeyboardButton("🧩 Masters (Sites & Drones)", callback_data="mgr:masters")],
                 [InlineKeyboardButton("ℹ️ Help", callback_data="main:help")],
             ]
         )
@@ -320,31 +356,27 @@ def token_expired(inv_row) -> bool:
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
 
 async def open_request_with_token(update: Update, context: ContextTypes.DEFAULT_TYPE, token: str):
-    """Verify invite token, open a join_request (pending), notify manager/admin immediately."""
     try:
         inv = get_invitation(token)
         if not inv or inv["status"] not in ("pending",):
             await reply_text_safe(update, context, "Invalid or inactive invite. Ask your manager/admin for a new link.")
-            logger.warning("Invite invalid or inactive | token=%s", token)
             return
 
         if token_expired(inv):
             msg = f"Invite expired (IST: {fmt_ist(inv['expires_at'].replace(tzinfo=UTC))}). Ask for a new link."
             await reply_text_safe(update, context, msg)
-            logger.info("Invite expired | token=%s expires_at=%s", token, inv["expires_at"])
             return
 
         tg = update.effective_user
         existing = find_pending_request(tg.id, inv["id"])
         if existing:
             jr_id = existing["id"]
-            logger.info("Join request already pending | jr_id=%s tg=%s token=%s", jr_id, tg.id, token)
         else:
             jr_id = create_join_request_min(
                 telegram_id=tg.id,
                 username=tg.username,
-                manager_id=inv["manager_id"],   # can be admin or manager
-                invite_role=inv["invite_role"], # EMPLOYEE or MANAGER
+                manager_id=inv["manager_id"],
+                invite_role=inv["invite_role"],
                 invitation_id=inv["id"],
             )
 
@@ -375,25 +407,17 @@ async def open_request_with_token(update: Update, context: ContextTypes.DEFAULT_
                 ),
                 reply_markup=kb,
             )
-            logger.info("Manager/Admin notified | manager_tg=%s jr_id=%s", mgr_tg, jr_id)
-        except Exception as e:
-            logger.exception("Failed to notify approver | approver_tg=%s jr_id=%s error=%s", mgr_tg, jr_id, e)
-
-    except Exception as e:
-        logger.exception("open_request_with_token failed | token=%s error=%s", token, e)
-        try:
-            await safe_send_message(context.bot, chat_id=update.effective_chat.id,
-                                    text="Something went wrong. Please try again.")
         except Exception:
             pass
 
+    except Exception:
+        await reply_text_safe(update, context, "Something went wrong. Please try again.")
+
 # ----------------- Handlers -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles /start and deep-link /start <token> (opens request, not profile)."""
     args = context.args
     if args:
         token = args[0].strip()
-        logger.info("/start with arg | user=%s token=%s", update.effective_user.id, token)
         if UUID_RE.match(token):
             await open_request_with_token(update, context, token)
             return
@@ -401,19 +425,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if u:
         await show_main_menu_message(update, context)
     else:
-        msg = (
+        await reply_text_safe(
+            update, context,
             "Hi! To join as an employee/manager, please use your invite link.\n\n"
             "If Start didn’t ask you, send your invite code using:\n"
             "/use <paste-your-code>"
         )
-        await reply_text_safe(update, context, msg)
 
 async def use_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
         await reply_text_safe(update, context, "Usage: /use <invite-code>")
         return
     token = context.args[0].strip()
-    logger.info("/use | user=%s token=%s", update.effective_user.id, token)
     if not UUID_RE.match(token):
         await reply_text_safe(update, context, "That doesn't look like a valid invite code.")
         return
@@ -422,7 +445,6 @@ async def use_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def detect_uuid_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     txt = (update.message.text or "").strip()
     if UUID_RE.match(txt):
-        logger.info("Raw UUID detected in chat | user=%s token=%s", update.effective_user.id, txt)
         await open_request_with_token(update, context, txt)
         return
     await show_main_menu_message(update, context)
@@ -443,7 +465,6 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     if not jr or jr["manager_id"] != actor["id"] or jr["status"] != "pending":
         await query.edit_message_text("This request is no longer pending.")
-        logger.info("Approve/reject ignored | jr_id=%s actor=%s", jr_id, actor["id"] if actor else None)
         return
 
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
@@ -460,7 +481,6 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 ]
             ),
         )
-        logger.info("Decision failed due to expired invite | jr_id=%s inv_id=%s", jr_id, jr["invitation_id"])
         return
 
     if action == "approve":
@@ -473,9 +493,8 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
                 text="Your request has been approved. Please complete your profile to finish joining.",
                 reply_markup=kb,
             )
-            logger.info("Approval sent to user | jr_id=%s user_tg=%s", jr_id, jr["telegram_id"])
-        except Exception as e:
-            logger.exception("Failed to notify user of approval | jr_id=%s error=%s", jr_id, e)
+        except Exception:
+            pass
 
         await query.edit_message_text(
             "Approved. The user has been asked to complete their profile.",
@@ -484,11 +503,9 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         update_join_request_status(jr_id, "rejected", decided_by=actor["id"])
         try:
-            await safe_send_message(context.bot, chat_id=jr["telegram_id"],
-                                    text="Your join request was rejected.")
-            logger.info("Rejection sent to user | jr_id=%s user_tg=%s", jr_id, jr["telegram_id"])
-        except Exception as e:
-            logger.exception("Failed to notify user of rejection | jr_id=%s error=%s", jr_id, e)
+            await safe_send_message(context.bot, chat_id=jr["telegram_id"], text="Your join request was rejected.")
+        except Exception:
+            pass
         await query.edit_message_text(
             "Rejected.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")]]),
@@ -496,7 +513,7 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
 # -------- Profile flow (after approval) --------
 async def profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query  # <- fixed (no call)
+    query = update.callback_query
     await query.answer()
 
     _, _, jr_id_s = query.data.split(":")
@@ -510,18 +527,15 @@ async def profile_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("This profile link is not for you.")
         return ConversationHandler.END
 
-    # Ensure invitation still valid
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute("SELECT * FROM invitations WHERE id=%s", (jr["invitation_id"],))
         inv = cur.fetchone()
     if not inv or token_expired(inv):
         await query.edit_message_text("The invite expired. Ask your manager/admin for a new one.")
-        logger.info("Profile start failed due to expired invite | jr_id=%s", jr_id)
         return ConversationHandler.END
 
     context.user_data["profile_jr_id"] = jr_id
     await query.edit_message_text("Your first name?")
-    logger.info("Profile collection started | jr_id=%s", jr_id)
     return ASK_FIRST
 
 async def ask_first(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -553,7 +567,6 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
     phone = "".join(ch for ch in (update.message.text or "") if ch.isdigit() or ch == "+")[:32]
     set_join_profile_field(jr_id, "phone", phone)
 
-    # Finalize → create/update users row now
     jr = get_join_request(jr_id)
     if not jr or jr["status"] != "approved":
         await reply_text_safe(update, context, "This request is no longer valid.")
@@ -573,7 +586,6 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     (jr["invite_role"], jr["manager_id"], jr.get("username"),
                      jr.get("first_name"), jr.get("last_name"), phone, user_id),
                 )
-                logger.info("Existing user updated from profile | user_id=%s jr_id=%s", user_id, jr_id)
             else:
                 cur.execute(
                     "INSERT INTO users "
@@ -583,7 +595,6 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
                      jr.get("first_name"), jr.get("last_name"), phone),
                 )
                 user_id = cur.lastrowid
-                logger.info("New user created from profile | user_id=%s jr_id=%s", user_id, jr_id)
 
         mark_invitation_used(jr["invitation_id"], user_id)
 
@@ -596,26 +607,226 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.clear()
     return ConversationHandler.END
 
-# -------- Manager/Admin panel --------
+# -------- Masters UI --------
+def masters_root_kb():
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton("🏷 Sites", callback_data="masters:pick:sites")],
+            [InlineKeyboardButton("🚁 Drones", callback_data="masters:pick:drones")],
+            [InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")],
+        ]
+    )
+
+def masters_kind_menu_kb(kind: str):
+    label = _label_for(kind)
+    return InlineKeyboardMarkup(
+        [
+            [InlineKeyboardButton(f"➕ Add {label}", callback_data=f"masters:add:{kind}")],
+            [InlineKeyboardButton(f"📋 List {label}s", callback_data=f"masters:list:{kind}")],
+            [InlineKeyboardButton(f"✏️ Rename {label}", callback_data=f"masters:rename:list:{kind}")],
+            [InlineKeyboardButton(f"🔄 Toggle Active", callback_data=f"masters:toggle:list:{kind}")],
+            [InlineKeyboardButton(f"🗑️ Delete {label}", callback_data=f"masters:delete:list:{kind}")],
+            [InlineKeyboardButton("⬅️ Back", callback_data="mgr:masters")],
+        ]
+    )
+
+def masters_list_back_kb(kind: str):
+    return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=f"masters:pick:{kind}")]])
+
+def masters_items_kb(kind: str, action: str):
+    """Build a keyboard listing items for rename/toggle/delete."""
+    items = masters_list(kind)
+    rows = []
+    if not items:
+        rows.append([InlineKeyboardButton("(No records)", callback_data=f"masters:pick:{kind}")])
+    else:
+        for it in items:
+            status = "✅" if it["is_active"] == 1 else "🚫"
+            text = f"{status} {it['name']}"
+            if action == "rename":
+                cb = f"masters:rename:{kind}:{it['id']}"
+            elif action == "toggle":
+                cb = f"masters:toggle:{kind}:{it['id']}"
+            elif action == "delete":
+                cb = f"masters:delask:{kind}:{it['id']}"
+            else:
+                cb = f"masters:pick:{kind}"
+            rows.append([InlineKeyboardButton(text, callback_data=cb)])
+    rows.append([InlineKeyboardButton("⬅️ Back", callback_data=f"masters:pick:{kind}")])
+    return InlineKeyboardMarkup(rows)
+
+async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """All inline flows for masters (except add/rename text entry which is in a conversation)."""
+    query = update.callback_query
+    await query.answer()
+    if not has_staff_privileges(update.effective_user.id):
+        await query.edit_message_text("You are not authorized.")
+        return
+
+    data = query.data
+
+    if data == "mgr:masters":
+        await query.edit_message_text("Masters — choose what to manage:", reply_markup=masters_root_kb())
+        return
+
+    if data.startswith("masters:pick:"):
+        _, _, kind = data.split(":")
+        await query.edit_message_text(f"Manage {_label_for(kind)}s:", reply_markup=masters_kind_menu_kb(kind))
+        return
+
+    # List (clean — no #id, only Back)
+    if data.startswith("masters:list:"):
+        _, _, kind = data.split(":")
+        items = masters_list(kind)
+        if not items:
+            txt = f"No {_label_for(kind)}s yet."
+        else:
+            lines = [f"{'✅' if r['is_active']==1 else '🚫'} {r['name']}" for r in items]
+            txt = "\n".join(lines)
+        await query.edit_message_text(txt or "No items.", reply_markup=masters_list_back_kb(kind))
+        return
+
+    # Add → ask for name (conversation starts; handled by ConversationHandler entry points)
+    if data.startswith("masters:add:"):
+        _, _, kind = data.split(":")
+        context.user_data["masters_kind"] = kind
+        context.user_data["masters_action"] = "add"
+        await query.edit_message_text(f"Send the new {_label_for(kind)} name.")
+        return MASTERS_ADD_NAME
+
+    # Rename → choose item list
+    if data.startswith("masters:rename:list:"):
+        _, _, _, kind = data.split(":")
+        await query.edit_message_text(
+            f"Select a {_label_for(kind)} to rename:",
+            reply_markup=masters_items_kb(kind, "rename")
+        )
+        return
+
+    # Rename → picked item, ask for new name (conversation)
+    if data.startswith("masters:rename:"):
+        _, _, kind, id_str = data.split(":")
+        context.user_data["masters_kind"] = kind
+        context.user_data["masters_action"] = "rename"
+        context.user_data["masters_id"] = int(id_str)
+        await query.edit_message_text(f"Send the new name for this {_label_for(kind)}.")
+        return MASTERS_RENAME_NAME
+
+    # Toggle → choose item list
+    if data.startswith("masters:toggle:list:"):
+        _, _, _, kind = data.split(":")
+        await query.edit_message_text(
+            f"Toggle active — select {_label_for(kind)}:",
+            reply_markup=masters_items_kb(kind, "toggle")
+        )
+        return
+
+    # Toggle → flip and show result
+    if data.startswith("masters:toggle:"):
+        _, _, kind, id_str = data.split(":")
+        ok, new_val = masters_toggle(kind, int(id_str))
+        status = "active" if new_val == 1 else "inactive"
+        msg = f"Updated: {_label_for(kind)} is now {status}." if ok else "Not found."
+        await query.edit_message_text(msg, reply_markup=masters_kind_menu_kb(kind))
+        return
+
+    # Delete → choose item list
+    if data.startswith("masters:delete:list:"):
+        _, _, _, kind = data.split(":")
+        await query.edit_message_text(
+            f"Delete {_label_for(kind)} — select item:",
+            reply_markup=masters_items_kb(kind, "delete")
+        )
+        return
+
+    # Delete → confirm
+    if data.startswith("masters:delask:"):
+        _, _, kind, id_str = data.split(":")
+        kb = InlineKeyboardMarkup(
+            [
+                [InlineKeyboardButton("✅ Yes, delete", callback_data=f"masters:del:{kind}:{id_str}")],
+                [InlineKeyboardButton("⬅️ Cancel", callback_data=f"masters:pick:{kind}")],
+            ]
+        )
+        await query.edit_message_text("Are you sure you want to delete this item?", reply_markup=kb)
+        return
+
+    # Delete → perform
+    if data.startswith("masters:del:"):
+        _, _, kind, id_str = data.split(":")
+        ok, err = masters_delete(kind, int(id_str))
+        if ok:
+            await query.edit_message_text("Deleted.", reply_markup=masters_kind_menu_kb(kind))
+        else:
+            await query.edit_message_text(
+                f"Cannot delete: this {_label_for(kind)} is referenced by existing reports.",
+                reply_markup=masters_kind_menu_kb(kind)
+            )
+        return
+
+# --- Masters conversation: add name / rename name ---
+async def masters_add_name_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kind = context.user_data.get("masters_kind")
+    if not kind:
+        await reply_text_safe(update, context, "Session expired. Open Masters again.")
+        return ConversationHandler.END
+    name = (update.message.text or "").strip()
+    if not name:
+        await reply_text_safe(update, context, "Name cannot be empty. Send a valid name.")
+        return MASTERS_ADD_NAME
+    try:
+        masters_add(kind, name)
+        await reply_text_safe(update, context, f"{_label_for(kind)} added.")
+    except mysql_errors.IntegrityError as e:
+        if getattr(e, "errno", None) == 1062:
+            await reply_text_safe(update, context, "That name already exists. Try another.")
+        else:
+            await reply_text_safe(update, context, f"DB error: {e}")
+    finally:
+        context.user_data.pop("masters_kind", None)
+        context.user_data.pop("masters_action", None)
+    await reply_text_safe(update, context, f"Manage {_label_for(kind)}s:", reply_markup=masters_kind_menu_kb(kind))
+    return ConversationHandler.END
+
+async def masters_rename_name_msg(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    kind = context.user_data.get("masters_kind")
+    rec_id = context.user_data.get("masters_id")
+    if not kind or not rec_id:
+        await reply_text_safe(update, context, "Session expired. Open Masters again.")
+        return ConversationHandler.END
+    new_name = (update.message.text or "").strip()
+    if not new_name:
+        await reply_text_safe(update, context, "Name cannot be empty. Send a valid name.")
+        return MASTERS_RENAME_NAME
+    try:
+        ok = masters_rename(kind, rec_id, new_name)
+        msg = "Updated." if ok else "Not found."
+        await reply_text_safe(update, context, msg)
+    except mysql_errors.IntegrityError as e:
+        if getattr(e, "errno", None) == 1062:
+            await reply_text_safe(update, context, "That name already exists. Try another.")
+        else:
+            await reply_text_safe(update, context, f"DB error: {e}")
+    finally:
+        context.user_data.pop("masters_kind", None)
+        context.user_data.pop("masters_action", None)
+        context.user_data.pop("masters_id", None)
+    await reply_text_safe(update, context, f"Manage {_label_for(kind)}s:", reply_markup=masters_kind_menu_kb(kind))
+    return ConversationHandler.END
+
+# -------- Manager Users panel (existing) --------
 def manager_panel_kb(actor):
     rows = [
         [InlineKeyboardButton("👥 Show Users", callback_data="mgr:show_users")],
+        [InlineKeyboardButton("🧩 Masters (Sites & Drones)", callback_data="mgr:masters")],
         [InlineKeyboardButton("➕ Invite Users", callback_data="mgr:invite")],
         [InlineKeyboardButton("⏳ Pending Approvals", callback_data="mgr:pending")],
     ]
     if actor and actor["role"] == ROLE_ADMIN:
-        rows.insert(1, [InlineKeyboardButton("➕ Invite Manager", callback_data="mgr:invite_mgr")])
+        rows.insert(2, [InlineKeyboardButton("➕ Invite Manager", callback_data="mgr:invite_mgr")])
     rows.append([InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")])
     return InlineKeyboardMarkup(rows)
 
-async def manage(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not has_staff_privileges(update.effective_user.id):
-        await reply_text_safe(update, context, "You are not authorized.")
-        return
-    actor = get_staff_record(update.effective_user.id)
-    await reply_text_safe(update, context, "Management panel:", reply_markup=manager_panel_kb(actor))
-
-# ===== Helpers for Show Users redesigned flow =====
 def _format_employee_line(e):
     fname = (e["first_name"] or "").strip()
     lname = (e["last_name"] or "").strip()
@@ -643,7 +854,6 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tg = update.effective_user
     actor = get_staff_record(tg.id)
     data = query.data
-    logger.info("Staff button | actor_tg=%s action=%s", tg.id, data)
 
     if data in ("mgr:panel", "mgr:back"):
         await query.edit_message_text("Management panel:", reply_markup=manager_panel_kb(actor))
@@ -707,7 +917,7 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return
 
         await query.edit_message_text(
-            f"Pending approvals: {len(items)} (each request shown below).",
+            f"Pending approvals: {len(items)}.",
             reply_markup=InlineKeyboardMarkup(
                 [[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
                  [InlineKeyboardButton("🏠 Main Menu", callback_data="main:menu")]]
@@ -750,7 +960,7 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
-    # ======= Redesigned "Show Users" (employees under this actor) =======
+    # ======= Show Users =======
     if data == "mgr:show_users":
         emps = list_employees(actor["id"], limit=25)
         if not emps:
@@ -934,7 +1144,6 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 def main():
     logger.info("Starting bot...")
 
-    # Robust HTTP timeouts for Telegram API
     request = HTTPXRequest(
         connect_timeout=20.0,
         read_timeout=20.0,
@@ -944,17 +1153,39 @@ def main():
 
     app = ApplicationBuilder().token(BOT_TOKEN).request(request).build()
 
-    # Commands
+    # --- Commands
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_cmd))
-    app.add_handler(CommandHandler("use", use_cmd))  # deep-link fallback
+    app.add_handler(CommandHandler("use", use_cmd))
 
-    # Staff callbacks (panel + invites + pending + show/deactivate flow)
-    app.add_handler(CallbackQueryHandler(manager_buttons, pattern=r"^mgr:"))
-    # Join request approve/reject
+    # --- Masters: Conversation FIRST (handles add & rename text entry)
+    masters_conv = ConversationHandler(
+        entry_points=[
+            CallbackQueryHandler(masters_buttons, pattern=r"^masters:add:(sites|drones)$"),
+            CallbackQueryHandler(masters_buttons, pattern=r"^masters:rename:(sites|drones):\d+$"),
+        ],
+        states={
+            MASTERS_ADD_NAME:    [MessageHandler(filters.TEXT & ~filters.COMMAND, masters_add_name_msg)],
+            MASTERS_RENAME_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, masters_rename_name_msg)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        allow_reentry=True,
+    )
+    app.add_handler(masters_conv)
+
+    # --- Masters: generic buttons AFTER, and EXCLUDE add/rename actual edits
+    app.add_handler(CallbackQueryHandler(
+        masters_buttons,
+        pattern=r"^(mgr:masters|masters:(pick:.*|list:.*|rename:list:.*|toggle(:|:list:.*|:.*)|delete(:|:list:.*|:.*)|delask:.*|del:.*))$"
+    ))
+
+    # --- Staff panel + invites + pending + users
+    app.add_handler(CallbackQueryHandler(manager_buttons, pattern=r"^mgr:(?!masters)"))
+
+    # --- Join request approve/reject
     app.add_handler(CallbackQueryHandler(join_request_callback, pattern=r"^jr:(approve|reject):\d+$"))
 
-    # Profile entry button (after approval)
+    # --- Profile flow
     profile_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(profile_start, pattern=r"^prof:start:\d+$")],
         states={
@@ -966,13 +1197,13 @@ def main():
     )
     app.add_handler(profile_conv)
 
-    # Main menu callbacks (help/report/home)
+    # --- Main menu callbacks (help/report/home)
     app.add_handler(CallbackQueryHandler(main_menu_callbacks, pattern=r"^(main:|emp:)"))
 
-    # Raw UUID pasted by a user OR any text → handle
+    # --- Fallback text
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, detect_uuid_text))
 
-    # Error handler
+    # --- Errors
     app.add_error_handler(error_handler)
 
     logger.info("Bot running...")
