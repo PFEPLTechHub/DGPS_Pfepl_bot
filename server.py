@@ -36,6 +36,8 @@ if not os.path.isdir(WEBAPP_DIR):
 
 # ------------------ DB Pool ------------------
 def create_pool():
+    # consume_results=True helps avoid "Unread result found" when using pooled connections.
+    # If your connector is older and doesn't support it, it will be ignored safely.
     return pooling.MySQLConnectionPool(
         pool_name="reportpool",
         pool_size=5,
@@ -45,6 +47,7 @@ def create_pool():
         user=MYSQL_USER,
         password=MYSQL_PASS,
         autocommit=True,
+        consume_results=True,  # <— key helper
     )
 
 try:
@@ -112,7 +115,7 @@ async def startup_log():
 
     # Light DB ping
     try:
-        with db_conn() as conn, conn.cursor() as cur:
+        with db_conn() as conn, conn.cursor(buffered=True) as cur:
             cur.execute("SELECT 1")
         logger.info("DB: OK (connected to %s:%s/%s)", MYSQL_HOST, MYSQL_PORT, MYSQL_DB)
     except Exception as e:
@@ -139,7 +142,7 @@ async def api_verify(req: Request):
     verified = verify_init_data(init_data, BOT_TOKEN)
 
     tg_id = int(verified["user"]["id"])
-    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+    with db_conn() as conn, conn.cursor(dictionary=True, buffered=True) as cur:
         cur.execute("SELECT id, role, is_active, first_name, last_name FROM users WHERE telegram_id=%s", (tg_id,))
         u = cur.fetchone()
 
@@ -155,7 +158,7 @@ async def api_verify(req: Request):
 @app.get("/api/masters")
 async def get_masters():
     try:
-        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        with db_conn() as conn, conn.cursor(dictionary=True, buffered=True) as cur:
             cur.execute("SELECT id, name FROM master_sites WHERE is_active=1 ORDER BY name")
             sites = cur.fetchall()
             cur.execute("SELECT id, name FROM master_drones WHERE is_active=1 ORDER BY name")
@@ -224,19 +227,20 @@ async def create_report(req: Request):
     if len(flights) > 10:
         raise HTTPException(status_code=400, detail="Flights cannot exceed 10")
 
-    # Ensure user is active employee
-    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-        cur.execute("SELECT role, is_active FROM users WHERE telegram_id=%s", (tg_id,))
-        u = cur.fetchone()
-    if not u or u["role"] != 2 or u["is_active"] != 1:
-        raise HTTPException(status_code=403, detail="Only active employees can submit reports")
-
-    # Resolve site_name/drone_name if ids were sent
-    site_name = payload.get("site_name", "").strip()
-    drone_name = payload.get("drone_name", "").strip()
+    # Use a SINGLE connection & buffered cursor for the entire flow
     try:
-        if not site_name or not drone_name:
-            with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        with db_conn() as conn:
+            conn.start_transaction()
+            with conn.cursor(dictionary=True, buffered=True) as cur:
+                # Ensure user is active employee (on same conn/cursor)
+                cur.execute("SELECT role, is_active FROM users WHERE telegram_id=%s", (tg_id,))
+                u = cur.fetchone()
+                if not u or u["role"] != 2 or u["is_active"] != 1:
+                    raise HTTPException(status_code=403, detail="Only active employees can submit reports")
+
+                # Resolve site_name/drone_name if ids were sent
+                site_name = (payload.get("site_name") or "").strip()
+                drone_name = (payload.get("drone_name") or "").strip()
                 if not site_name and "site_id" in payload:
                     cur.execute("SELECT name FROM master_sites WHERE id=%s", (int(payload["site_id"]),))
                     r = cur.fetchone()
@@ -249,32 +253,23 @@ async def create_report(req: Request):
                     if not r:
                         raise HTTPException(status_code=400, detail="Invalid drone_id")
                     drone_name = r["name"]
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.exception("masters lookup failed")
-        raise HTTPException(status_code=500, detail="Failed to resolve site/drone")
 
-    # Compute totals from flights (server-side truth)
-    total_time_min = 0
-    total_area_sq_km = 0.0
-    norm_flights = []
-    for f in flights:
-        t = int(f.get("flight_time_min", 0))
-        a = float(f.get("area_sq_km", 0.0))
-        ufile = (f.get("uav_rover_file") or "").strip()
-        bfile = (f.get("drone_base_file_no") or "").strip()
-        if t <= 0 or a <= 0 or not ufile or not bfile:
-            raise HTTPException(status_code=400, detail="Each flight needs time>0, area>0, UBX, Base File")
-        total_time_min += t
-        total_area_sq_km += a
-        norm_flights.append((t, a, ufile, bfile))
+                # Compute totals from flights (server-side)
+                total_time_min = 0
+                total_area_sq_km = 0.0
+                norm_flights = []
+                for f in flights:
+                    t = int(f.get("flight_time_min", 0))
+                    a = float(f.get("area_sq_km", 0.0))
+                    ufile = (f.get("uav_rover_file") or "").strip()
+                    bfile = (f.get("drone_base_file_no") or "").strip()
+                    if t <= 0 or a <= 0 or not ufile or not bfile:
+                        raise HTTPException(status_code=400, detail="Each flight needs time>0, area>0, UBX, Base File")
+                    total_time_min += t
+                    total_area_sq_km += a
+                    norm_flights.append((t, a, ufile, bfile))
 
-    # Insert
-    try:
-        with db_conn() as conn:
-            conn.start_transaction()
-            with conn.cursor() as cur:
+                # Insert report (names are stored; no FK)
                 cur.execute(
                     """
                     INSERT INTO reports (
@@ -303,6 +298,7 @@ async def create_report(req: Request):
                 )
                 report_id = cur.lastrowid
 
+                # Insert flights
                 for (t, a, ufile, bfile) in norm_flights:
                     cur.execute(
                         """
@@ -312,9 +308,13 @@ async def create_report(req: Request):
                         """,
                         (report_id, t, a, ufile, bfile),
                     )
-            conn.commit()
 
+            conn.commit()
         return {"ok": True, "report_id": report_id}
+
+    except HTTPException:
+        # Raised intentionally above
+        raise
 
     except mysql_errors.IntegrityError as e:
         # Duplicate (unique uq_emp_date) → 409 Conflict
