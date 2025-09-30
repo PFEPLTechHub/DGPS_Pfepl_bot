@@ -28,6 +28,14 @@ logger = logging.getLogger(__name__)
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.secret_key = APP_SECRET
 
+# Register fmt_ist as a Jinja2 global function
+def fmt_ist(dt_utc_naive):
+    """Display timestamp as-is, assuming it's stored in IST."""
+    if not dt_utc_naive:
+        return "-"
+    return dt_utc_naive.strftime("%d %b %Y %I:%M %p IST")
+app.jinja_env.globals['fmt_ist'] = fmt_ist
+
 # ----------------- DB Pool -----------------
 dbconfig = {
     "host": MYSQL_HOST,
@@ -57,12 +65,6 @@ SESSION_TOKEN_ENABLED = has_session_token_column()
 # ----------------- Time Helpers -----------------
 def today_ist_str():
     return datetime.now().strftime("%Y-%m-%d")
-
-def fmt_ist(dt_utc_naive):
-    """Display timestamp as-is, assuming it's stored in IST."""
-    if not dt_utc_naive:
-        return "-"
-    return dt_utc_naive.strftime("%d %b %Y %I:%M %p IST")
 
 # ----------------- Auth -----------------
 def login_required(view):
@@ -212,7 +214,7 @@ def edit_report_page():
         for e in emps
     ]
 
-    selected_date = request.form.get("date") or today_ist_str()
+    selected_date = request.form.get("date") or request.args.get("date") or today_ist_str()
     selected_employee = request.form.get("employee") or ""
 
     return render_template(
@@ -308,7 +310,7 @@ def api_reports():
 
     return jsonify({"ok": True, "reports": reports})
 
-# ----------------- Report detail (view/edit) -----------------
+# ----------------- Report detail (view/edit/preview) -----------------
 def _get_report(report_id: int):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
@@ -336,6 +338,15 @@ def report_detail(report_id):
         flash("Report not found.", "danger")
         return redirect(url_for("dashboard"))
     return render_template("report_detail.html", report=rep, flights=flights, readonly=True)
+
+@app.route("/report/<int:report_id>/preview", methods=["GET"])
+@login_required
+def report_preview(report_id):
+    rep, flights = _get_report(report_id)
+    if not rep:
+        flash("Report not found.", "danger")
+        return "", 404
+    return render_template("report_preview.html", report=rep, flights=flights)
 
 @app.route("/report/<int:report_id>/edit", methods=["GET", "POST"])
 @login_required
@@ -440,7 +451,7 @@ def report_edit(report_id):
             )
 
     flash("Report updated.", "success")
-    return redirect(url_for("report_detail", report_id=report_id))
+    return redirect(url_for("edit_report_page", date=rep["report_date"]))
 
 # ----------------- Run -----------------
 if __name__ == "__main__":

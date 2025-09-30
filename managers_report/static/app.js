@@ -50,7 +50,7 @@ MGR.fetchReports = async function() {
         <td class="p-3">${report.drone_name}</td>
         <td class="p-3">${report.created_at}</td>
         <td class="p-3">
-          <a class="text-blue-600 hover:underline" href="/report/${report.id}">View</a> |
+          <a class="text-blue-600 hover:underline cursor-pointer" onclick="MGR.viewReport(${report.id})">View</a> |
           <a class="text-blue-600 hover:underline" href="/report/${report.id}/edit">Edit</a>
         </td>
       `;
@@ -58,6 +58,18 @@ MGR.fetchReports = async function() {
     });
   } catch (err) {
     alert('Error loading reports: ' + err.message);
+  }
+};
+
+MGR.viewReport = async function(reportId) {
+  try {
+    const res = await fetch(`/report/${reportId}/preview`);
+    if (!res.ok) throw new Error('Failed to load report');
+    const html = await res.text();
+    document.getElementById('modalContent').innerHTML = html;
+    document.getElementById('viewModal').classList.remove('hidden');
+  } catch (err) {
+    alert('Error loading report: ' + err.message);
   }
 };
 
