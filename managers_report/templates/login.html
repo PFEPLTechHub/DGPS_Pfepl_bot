@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Login — Manager Dashboard{% endblock %}
+{% block content %}
+<div class="card" style="max-width:420px;margin:24px auto;">
+  <h2 class="card-title">Manager Login</h2>
+  <form method="post" class="form">
+    <label>Login</label>
+    <input type="text" name="login" value="{{ login_prefill or '' }}" required>
+
+    <label>Password</label>
+    <input type="password" name="password" required>
+
+    <button type="submit" class="btn">Sign In</button>
+  </form>
+
+  <!-- Optional: place Telegram Login widget here later if you wish -->
+</div>
+{% endblock %}

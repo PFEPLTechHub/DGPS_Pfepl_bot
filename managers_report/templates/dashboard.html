@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Track — Manager Dashboard{% endblock %}
+{% block content %}
+<h2>Track Daily Submissions</h2>
+
+<div class="controls">
+  <label for="datePicker">Date</label>
+  <input id="datePicker" type="date" value="{{ default_date }}">
+  <button id="btnRefresh" class="btn">Refresh</button>
+</div>
+
+<div class="table-wrap">
+  <table class="table" id="trackTable">
+    <thead>
+      <tr>
+        <th>Sr. No.</th>
+        <th>Employee Name</th>
+        <th>Submission Time</th>
+        <th>Status</th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      <!-- rows inserted by JS -->
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+window.MGR = window.MGR || {};
+MGR.fetchTrack = async function(){
+  const date = document.getElementById('datePicker').value;
+  const res = await fetch(`/api/track?date=${encodeURIComponent(date)}`);
+  if(!res.ok){ alert('Failed to load.'); return; }
+  const data = await res.json();
+  const TB = document.querySelector('#trackTable tbody');
+  TB.innerHTML = '';
+  (data.rows || []).forEach(row => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${row.sr}</td>
+      <td>${row.name}</td>
+      <td>${row.time}</td>
+      <td>${row.status}</td>
+      <td>${
+        row.report_id
+          ? `<a class="link" href="/report/${row.report_id}">View</a> · <a class="link" href="/report/${row.report_id}/edit">Edit</a>`
+          : `—`
+      }</td>
+    `;
+    TB.appendChild(tr);
+  });
+};
+document.getElementById('btnRefresh').addEventListener('click', MGR.fetchTrack);
+document.addEventListener('DOMContentLoaded', MGR.fetchTrack);
+</script>
+{% endblock %}

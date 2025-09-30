@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}Manager Dashboard{% endblock %}</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand">Managers</div>
+      <nav class="nav">
+        <a class="nav-link{% if request.path.startswith('/dashboard') %} active{% endif %}" href="{{ url_for('dashboard') }}">Track</a>
+        <a class="nav-link{% if request.path.startswith('/view-report') %} active{% endif %}" href="{{ url_for('view_report_page') }}">View Report</a>
+        <a class="nav-link{% if request.path.startswith('/edit-report') %} active{% endif %}" href="{{ url_for('edit_report_page') }}">Edit Report</a>
+      </nav>
+      {% if session.get('manager_login') %}
+      <div class="sidebar-footer">
+        <div class="mgr">👤 {{ session['manager_login'] }}</div>
+        <a class="logout" href="{{ url_for('logout') }}">Logout</a>
+      </div>
+      {% endif %}
+    </aside>
+
+    <main class="content">
+      {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-wrap">
+          {% for cat, msg in messages %}
+            <div class="flash flash-{{ cat }}">{{ msg }}</div>
+          {% endfor %}
+        </div>
+      {% endif %}
+      {% endwith %}
+      {% block content %}{% endblock %}
+    </main>
+  </div>
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

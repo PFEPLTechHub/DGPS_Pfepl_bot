@@ -1,0 +1,61 @@
+:root{
+  --bg:#f7f7f8; --card:#fff; --muted:#667085; --line:#e5e7eb;
+  --brand:#1f6feb; --brand-600:#1a5cc7; --danger:#b00020; --success:#0f8b3a;
+  --text:#111827;
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{margin:0;background:var(--bg);color:var(--text);font-family:system-ui,Arial,sans-serif}
+
+.layout{display:flex;min-height:100vh}
+.sidebar{
+  width:240px;background:#0b1020;color:#d8e1ff;padding:16px 12px;display:flex;flex-direction:column
+}
+.brand{font-weight:800;letter-spacing:.5px;margin:8px 8px 16px;font-size:18px}
+.nav{display:flex;flex-direction:column;gap:6px}
+.nav-link{color:#d8e1ff;text-decoration:none;padding:10px 12px;border-radius:8px}
+.nav-link:hover{background:rgba(255,255,255,.06)}
+.nav-link.active{background:rgba(255,255,255,.12)}
+.sidebar-footer{margin-top:auto;padding:8px 6px;border-top:1px solid rgba(255,255,255,.1)}
+.mgr{margin-bottom:6px;font-size:13px;opacity:.9}
+.logout{color:#ffd5d5;text-decoration:none;font-size:13px}
+
+.content{flex:1;padding:20px 24px;max-width:1200px;margin:0 auto}
+h2{margin:0 0 16px}
+.muted{color:var(--muted)}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card + .card{margin-top:12px}
+.card-title{margin:0 0 10px}
+
+.form label{display:block;margin-top:8px;font-weight:600}
+.form input,.form textarea,.form select{
+  width:100%;max-width:420px;padding:8px;border:1px solid var(--line);border-radius:8px;background:#fff
+}
+.btn{
+  display:inline-block;margin-top:12px;padding:10px 14px;background:var(--brand);
+  color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600
+}
+.btn:hover{background:var(--brand-600)}
+.link{color:var(--brand);text-decoration:none}
+.link:hover{text-decoration:underline}
+
+.controls{display:flex;gap:10px;align-items:flex-end;margin-bottom:12px}
+.controls input{max-width:200px}
+
+.table-wrap{background:var(--card);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.table{width:100%;border-collapse:collapse}
+.table th,.table td{padding:10px;border-bottom:1px solid var(--line);text-align:left}
+.table thead th{background:#f0f4ff;font-weight:700}
+.table tbody tr:hover{background:#fafcff}
+
+.flash-wrap{margin-bottom:12px}
+.flash{padding:10px 12px;border-radius:8px}
+.flash-danger{background:#ffe6ea;color:#8a1027}
+.flash-success{background:#e7fbef;color:#125c34}
+
+.grid{display:grid;gap:12px}
+@media (min-width: 900px){
+  .grid{grid-template-columns:1.2fr .8fr}
+}
+.kv > div{margin:6px 0}

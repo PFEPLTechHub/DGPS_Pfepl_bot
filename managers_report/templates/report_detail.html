@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% if report %}
+  {% set page_title = 'Report #' ~ report.id %}
+{% else %}
+  {% set page_title = readonly and 'View Report' or 'Edit Report' %}
+{% endif %}
+{% block title %}{{ page_title }} — Manager Dashboard{% endblock %}
+
+{% block content %}
+<h2>{{ page_title }}</h2>
+
+{% if not report %}
+<p class="muted">Open a report from the <a href="{{ url_for('dashboard') }}">Track</a> page.</p>
+{% else %}
+<div class="grid">
+  <div class="card">
+    <h3 class="card-title">Summary</h3>
+    <div class="kv">
+      <div><b>Date:</b> {{ report.report_date }}</div>
+      <div><b>Employee TG:</b> {{ report.employee_telegram_id }}</div>
+      <div><b>Site:</b> {{ report.site_name or report.site_id }}</div>
+      <div><b>Drone:</b> {{ report.drone_name or report.drone_id }}</div>
+      <div><b>Pilot:</b> {{ report.pilot_name }}</div>
+      <div><b>Copilot:</b> {{ report.copilot_name }}</div>
+      <div><b>Base Height (m):</b> {{ '%.2f'|format(report.base_height_m) }}</div>
+      <div><b>Created:</b> {{ report.created_at }}</div>
+      <div><b>DGPS Used:</b> {{ report.dgps_used_json }}</div>
+      <div><b>DGPS Operators:</b> {{ report.dgps_operators_json }}</div>
+      <div><b>Grid Numbers:</b> {{ report.grid_numbers_json }}</div>
+      <div><b>GCP Points:</b> {{ report.gcp_points_json }}</div>
+      <div><b>Remark:</b> {{ report.remark }}</div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="card-title">Flights</h3>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>Time (min)</th>
+          <th>Area (sq km)</th>
+          <th>UBX</th>
+          <th>Base File</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in flights %}
+        <tr>
+          <td>{{ loop.index }}</td>
+          <td>{{ f.flight_time_min }}</td>
+          <td>{{ '%.3f'|format(f.area_sq_km) }}</td>
+          <td>{{ f.uav_rover_file }}</td>
+          <td>{{ f.drone_base_file_no }}</td>
+        </tr>
+        {% endfor %}
+        {% if not flights %}
+        <tr><td colspan="5" class="muted">No flights recorded.</td></tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if not readonly %}
+  <div class="card">
+    <h3 class="card-title">Edit Fields</h3>
+    <form method="post" action="{{ url_for('report_edit', report_id=report.id) }}" class="form">
+      <label>Pilot</label>
+      <input type="text" name="pilot_name" value="{{ report.pilot_name or '' }}">
+
+      <label>Copilot</label>
+      <input type="text" name="copilot_name" value="{{ report.copilot_name or '' }}">
+
+      <label>Base Height (m)</label>
+      <input type="number" step="0.01" name="base_height_m" value="{{ report.base_height_m }}">
+
+      <label>Remark</label>
+      <textarea name="remark" rows="3">{{ report.remark or '' }}</textarea>
+
+      <button type="submit" class="btn">Save Changes</button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
