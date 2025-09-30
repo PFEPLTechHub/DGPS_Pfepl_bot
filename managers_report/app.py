@@ -5,7 +5,6 @@ from flask import (
     Flask, render_template, request, redirect, url_for,
     session, jsonify, flash
 )
-from werkzeug.security import check_password_hash
 import mysql.connector
 from mysql.connector import pooling
 
@@ -82,76 +81,30 @@ def login():
 
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
-            "SELECT login, password_hash, telegram_id, is_active "
-            "FROM manager_logins WHERE login=%s LIMIT 1",
+            "SELECT login, password, telegram_id, is_active "
+            "FROM manager_logins WHERE login = %s LIMIT 1",
             (login_id,)
         )
         row = cur.fetchone()
 
-    if not row or row["is_active"] != 1:
-        flash("Invalid credentials or inactive account.", "danger")
+    if not row:
+        flash("No account found for this login.", "danger")
         return render_template("login.html", login_prefill=login_id)
 
-    if not check_password_hash(row["password_hash"], password):
-        flash("Invalid credentials.", "danger")
+    if row["is_active"] != 1:
+        flash("Account is inactive.", "danger")
         return render_template("login.html", login_prefill=login_id)
 
-    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-        cur.execute(
-            "SELECT id, role, is_active FROM users WHERE telegram_id=%s",
-            (row["telegram_id"],)
-        )
-        u = cur.fetchone()
-
-    if not u or u["is_active"] != 1 or u["role"] not in (0, 1):
-        flash("Your Telegram user isn’t an active admin/manager.", "danger")
+    if row["password"] != password:
+        flash("Incorrect password.", "danger")
         return render_template("login.html", login_prefill=login_id)
 
-    session["manager_login"]   = row["login"]
-    session["manager_tg"]      = row["telegram_id"]
-    session["manager_user_id"] = u["id"]
+    session["manager_login"] = row["login"]
+    session["manager_tg"] = row["telegram_id"]
     session.permanent = True
 
     next_url = request.args.get("next") or url_for("dashboard")
     return redirect(next_url)
-
-@app.route("/telegram-login", methods=["POST"])
-def telegram_login():
-    try:
-        data = request.get_json()
-        telegram_id = data.get("id")
-        if not telegram_id:
-            return jsonify({"ok": False, "error": "No Telegram ID provided"}), 400
-
-        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-            cur.execute(
-                "SELECT login, telegram_id, is_active "
-                "FROM manager_logins WHERE telegram_id=%s LIMIT 1",
-                (telegram_id,)
-            )
-            row = cur.fetchone()
-
-        if not row or row["is_active"] != 1:
-            return jsonify({"ok": False, "error": "Invalid or inactive Telegram account"}), 401
-
-        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-            cur.execute(
-                "SELECT id, role, is_active FROM users WHERE telegram_id=%s",
-                (telegram_id,)
-            )
-            u = cur.fetchone()
-
-        if not u or u["is_active"] != 1 or u["role"] not in (0, 1):
-            return jsonify({"ok": False, "error": "Not an active manager"}), 401
-
-        session["manager_login"]   = row["login"]
-        session["manager_tg"]      = row["telegram_id"]
-        session["manager_user_id"] = u["id"]
-        session.permanent = True
-
-        return jsonify({"ok": True})
-    except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/logout")
 def logout():
@@ -180,14 +133,17 @@ def edit_report_page():
 @login_required
 def api_track():
     date_str = request.args.get("date") or today_ist_str()
-    mgr_user_id = session["manager_user_id"]
+    mgr_tg_id = session["manager_tg"]
 
+    # Get employees under this manager
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
-            "SELECT telegram_id, first_name, last_name, username "
-            "FROM users WHERE role=2 AND is_active=1 AND manager_id=%s "
-            "ORDER BY first_name, last_name, id",
-            (mgr_user_id,)
+            "SELECT u.telegram_id, u.first_name, u.last_name, u.username "
+            "FROM users u "
+            "WHERE u.role = 2 AND u.is_active = 1 AND u.manager_id = "
+            "(SELECT id FROM users WHERE telegram_id = %s LIMIT 1) "
+            "ORDER BY u.first_name, u.last_name, u.id",
+            (mgr_tg_id,)
         )
         emps = cur.fetchall()
 
@@ -198,12 +154,13 @@ def api_track():
         lname = (e["last_name"] or "").strip()
         names[e["telegram_id"]] = (fname + " " + lname).strip() or (e["username"] or f"tg:{e['telegram_id']}")
 
+    # Get reports for the selected date
     report_by_tg = {}
     if tg_ids:
         placeholders = ",".join(["%s"] * len(tg_ids))
         q = (
             f"SELECT id, employee_telegram_id, created_at "
-            f"FROM reports WHERE report_date=%s AND employee_telegram_id IN ({placeholders})"
+            f"FROM reports WHERE report_date = %s AND employee_telegram_id IN ({placeholders})"
         )
         with db_conn() as conn, conn.cursor(dictionary=True) as cur:
             cur.execute(q, [date_str] + tg_ids)
@@ -228,11 +185,9 @@ def api_track():
 def _get_report(report_id: int):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
-            "SELECT r.*, ms.name AS site_name, md.name AS drone_name "
+            "SELECT r.* "
             "FROM reports r "
-            "LEFT JOIN master_sites  ms ON r.site_id = ms.id "
-            "LEFT JOIN master_drones md ON r.drone_id = md.id "
-            "WHERE r.id=%s",
+            "WHERE r.id = %s",
             (report_id,)
         )
         rep = cur.fetchone()
@@ -240,7 +195,7 @@ def _get_report(report_id: int):
             return None, []
         cur.execute(
             "SELECT id, flight_time_min, area_sq_km, uav_rover_file, drone_base_file_no "
-            "FROM report_flights WHERE report_id=%s ORDER BY id",
+            "FROM report_flights WHERE report_id = %s ORDER BY id",
             (report_id,)
         )
         flights = cur.fetchall()
@@ -266,9 +221,9 @@ def report_edit(report_id):
     if request.method == "GET":
         return render_template("report_detail.html", report=rep, flights=flights, readonly=False)
 
-    pilot   = (request.form.get("pilot_name") or "").strip()
+    pilot = (request.form.get("pilot_name") or "").strip()
     copilot = (request.form.get("copilot_name") or "").strip()
-    remark  = (request.form.get("remark") or "").strip()
+    remark = (request.form.get("remark") or "").strip()
     try:
         base_h = float(request.form.get("base_height_m") or rep["base_height_m"])
     except Exception:
@@ -276,7 +231,7 @@ def report_edit(report_id):
 
     with db_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE reports SET pilot_name=%s, copilot_name=%s, base_height_m=%s, remark=%s WHERE id=%s",
+            "UPDATE reports SET pilot_name = %s, copilot_name = %s, base_height_m = %s, remark = %s WHERE id = %s",
             (pilot or rep["pilot_name"], copilot or rep["copilot_name"], base_h, remark, report_id)
         )
 
@@ -285,4 +240,4 @@ def report_edit(report_id):
 
 # ----------------- Run -----------------
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=9000, debug=False)
+    app.run(host="0.0.0.0", port=9000, debug=True)
