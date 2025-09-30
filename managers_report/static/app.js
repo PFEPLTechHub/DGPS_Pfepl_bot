@@ -81,7 +81,7 @@ MGR.editReport = async function(reportId) {
     const html = await res.text();
     document.getElementById('editModalContent').innerHTML = html;
     document.getElementById('editModal').classList.remove('hidden');
-    // Re-attach form validation
+    // Re-attach form submission handler
     document.querySelector("#editModal form")?.addEventListener("submit", async function(e) {
       e.preventDefault();
       if (!window.validateForm()) return;
@@ -92,7 +92,14 @@ MGR.editReport = async function(reportId) {
           body: new FormData(form),
         });
         const data = await res.json();
-        if (data.ok) {
+        // Check for flash messages in session
+        const flashRes = await fetch('/api/flash-messages');
+        const flashData = await flashRes.json();
+        if (flashData.messages && flashData.messages.length > 0) {
+          flashData.messages.forEach(msg => {
+            alert(`${msg[1]} (${msg[0]})`);
+          });
+        } else if (data.ok) {
           alert(data.message);
           document.getElementById('editModal').classList.add('hidden');
           MGR.fetchReports();
@@ -115,7 +122,14 @@ MGR.deleteReport = async function(reportId) {
       method: 'POST',
     });
     const data = await res.json();
-    if (data.ok) {
+    // Check for flash messages
+    const flashRes = await fetch('/api/flash-messages');
+    const flashData = await flashRes.json();
+    if (flashData.messages && flashData.messages.length > 0) {
+      flashData.messages.forEach(msg => {
+        alert(`${msg[1]} (${msg[0]})`);
+      });
+    } else if (data.ok) {
       alert(data.message);
       MGR.fetchReports();
     } else {
@@ -123,6 +137,21 @@ MGR.deleteReport = async function(reportId) {
     }
   } catch (err) {
     alert('Error deleting report: ' + err.message);
+  }
+};
+
+// Fetch flash messages
+MGR.getFlashMessages = async function() {
+  try {
+    const res = await fetch('/api/flash-messages');
+    const data = await res.json();
+    if (data.messages && data.messages.length > 0) {
+      data.messages.forEach(msg => {
+        alert(`${msg[1]} (${msg[0]})`);
+      });
+    }
+  } catch (err) {
+    console.error('Error fetching flash messages:', err);
   }
 };
 
@@ -138,4 +167,6 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   if (document.getElementById('reportsTableBody')) MGR.fetchReports();
   if (document.getElementById('trackTableBody')) MGR.fetchTrack();
+  // Fetch flash messages on page load
+  MGR.getFlashMessages();
 });

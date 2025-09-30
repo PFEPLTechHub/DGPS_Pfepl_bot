@@ -5,7 +5,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, jsonify, flash
+    session, jsonify, flash, get_flashed_messages
 )
 import mysql.connector
 from mysql.connector import pooling
@@ -178,6 +178,13 @@ def logout():
             logger.warning(f"Failed to clear session_token: {e}")
     session.clear()
     return redirect(url_for("login"))
+
+# ----------------- Flash Messages API -----------------
+@app.route("/api/flash-messages", methods=["GET"])
+@login_required
+def get_flash_messages():
+    messages = get_flashed_messages(with_categories=True)
+    return jsonify({"messages": messages})
 
 # ----------------- Sidebar Pages -----------------
 @app.route("/dashboard")
@@ -360,6 +367,7 @@ def report_edit(report_id):
         return render_template("report_edit.html", report=rep, flights=flights)
 
     # Collect and validate form data
+    report_date = (request.form.get("report_date") or "").strip()
     pilot = (request.form.get("pilot_name") or "").strip()
     copilot = (request.form.get("copilot_name") or "").strip()
     remark = (request.form.get("remark") or "").strip()
@@ -374,6 +382,8 @@ def report_edit(report_id):
 
     # Validate inputs
     errors = []
+    if not report_date:
+        errors.append("Report date is required.")
     if not pilot:
         errors.append("Pilot name is required.")
     if not copilot:
@@ -396,8 +406,9 @@ def report_edit(report_id):
     flight_ubxs = request.form.getlist("flight_ubx[]")
     flight_bases = request.form.getlist("flight_base[]")
     flights_data = []
-    for i in range(len(flight_ids)):
+    for i in range(len(flight_times)):
         try:
+            flight_id = flight_ids[i] if i < len(flight_ids) and flight_ids[i] else None
             time = float(flight_times[i]) if flight_times[i] else 0
             area = float(flight_areas[i]) if flight_areas[i] else 0
             ubx = (flight_ubxs[i] or "").strip()
@@ -411,7 +422,7 @@ def report_edit(report_id):
             if not base:
                 errors.append(f"Flight {i+1}: Base file required.")
             flights_data.append({
-                "id": flight_ids[i] if flight_ids[i] else None,
+                "id": flight_id,
                 "flight_time_min": time,
                 "area_sq_km": area,
                 "uav_rover_file": ubx,
@@ -426,41 +437,51 @@ def report_edit(report_id):
         return render_template("report_edit.html", report=rep, flights=flights)
 
     # Update report
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "UPDATE reports SET pilot_name = %s, copilot_name = %s, base_height_m = %s, "
-            "dgps_used_json = %s, dgps_operators_json = %s, grid_numbers_json = %s, "
-            "gcp_points_json = %s, remark = %s, total_time_min = %s, total_area_sq_km = %s "
-            "WHERE id = %s",
-            (
-                pilot, copilot, base_h,
-                dgps_used, dgps_operators, grid_numbers, gcp_points,
-                remark,
-                sum(f["flight_time_min"] for f in flights_data),
-                sum(f["area_sq_km"] for f in flights_data),
-                report_id
-            )
-        )
-        # Update flights
-        cur.execute("DELETE FROM report_flights WHERE report_id = %s", (report_id,))
-        for f in flights_data:
+    try:
+        with db_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "INSERT INTO report_flights (report_id, flight_time_min, area_sq_km, uav_rover_file, drone_base_file_no) "
-                "VALUES (%s, %s, %s, %s, %s)",
-                (report_id, f["flight_time_min"], f["area_sq_km"], f["uav_rover_file"], f["drone_base_file_no"])
+                "UPDATE reports SET report_date = %s, pilot_name = %s, copilot_name = %s, base_height_m = %s, "
+                "dgps_used_json = %s, dgps_operators_json = %s, grid_numbers_json = %s, "
+                "gcp_points_json = %s, remark = %s, total_time_min = %s, total_area_sq_km = %s "
+                "WHERE id = %s",
+                (
+                    report_date, pilot, copilot, base_h,
+                    dgps_used, dgps_operators, grid_numbers, gcp_points,
+                    remark,
+                    sum(f["flight_time_min"] for f in flights_data),
+                    sum(f["area_sq_km"] for f in flights_data),
+                    report_id
+                )
             )
+            # Update flights
+            cur.execute("DELETE FROM report_flights WHERE report_id = %s", (report_id,))
+            for f in flights_data:
+                cur.execute(
+                    "INSERT INTO report_flights (report_id, flight_time_min, area_sq_km, uav_rover_file, drone_base_file_no) "
+                    "VALUES (%s, %s, %s, %s, %s)",
+                    (report_id, f["flight_time_min"], f["area_sq_km"], f["uav_rover_file"], f["drone_base_file_no"])
+                )
+    except Exception as e:
+        logger.error(f"Failed to update report {report_id}: {e}")
+        flash("Failed to update report due to a server error.", "danger")
+        return jsonify({"ok": False, "message": "Failed to update report."})
 
-    flash("Report updated.", "success")
-    return jsonify({"ok": True, "message": "Report updated."})
+    flash("Report updated successfully.", "success")
+    return jsonify({"ok": True, "message": "Report updated successfully."})
 
 @app.route("/report/<int:report_id>/delete", methods=["POST"])
 @login_required
 def report_delete(report_id):
-    with db_conn() as conn, conn.cursor() as cur:
-        cur.execute("DELETE FROM reports WHERE id = %s", (report_id,))
-        # report_flights are cascaded by FK constraint
-    flash("Report deleted.", "success")
-    return jsonify({"ok": True, "message": "Report deleted."})
+    try:
+        with db_conn() as conn, conn.cursor() as cur:
+            cur.execute("DELETE FROM reports WHERE id = %s", (report_id,))
+            # report_flights are cascaded by FK constraint
+    except Exception as e:
+        logger.error(f"Failed to delete report {report_id}: {e}")
+        flash("Failed to delete report due to a server error.", "danger")
+        return jsonify({"ok": False, "message": "Failed to delete report."})
+    flash("Report deleted successfully.", "success")
+    return jsonify({"ok": True, "message": "Report deleted successfully."})
 
 # ----------------- Run -----------------
 if __name__ == "__main__":

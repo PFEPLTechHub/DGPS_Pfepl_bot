@@ -9,10 +9,12 @@
 <body>
   <div class="p-6 max-w-lg">
     <h3 class="text-lg font-semibold text-gray-800 mb-4">Edit Report #{{ report.id }}</h3>
-    <form method="post" action="{{ url_for('report_edit', report_id=report.id) }}" class="space-y-4">
+    <form method="post" action="{{ url_for('report_edit', report_id=report.id) }}" id="editForm" class="space-y-4">
       <div>
-        <label class="block text-sm font-medium text-gray-700">Date</label>
-        <p class="mt-1 p-3 bg-gray-100 rounded-lg">{{ report.report_date }}</p>
+        <label for="report_date" class="block text-sm font-medium text-gray-700">Date</label>
+        <input id="report_date" type="date" name="report_date" value="{{ report.report_date }}"
+               class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_report_date">Required</p>
       </div>
       <div>
         <label class="block text-sm font-medium text-gray-700">Site</label>
@@ -79,8 +81,11 @@
         <p class="text-red-600 text-sm mt-1 hidden" id="err_remark">Required</p>
       </div>
       <div>
-        <h3 class="text-lg font-semibold text-gray-800 mb-4">Edit Flights</h3>
-        <table class="w-full table-auto mb-4">
+        <div class="flex justify-between items-center mb-4">
+          <h3 class="text-lg font-semibold text-gray-800">Edit Flights</h3>
+          <button type="button" onclick="addFlightRow()" class="py-2 px-4 bg-green-600 text-white rounded-lg hover:bg-green-700 font-semibold transition duration-200">Add Flight</button>
+        </div>
+        <table class="w-full table-auto mb-4" id="flightsTable">
           <thead>
             <tr class="bg-blue-50 text-gray-700">
               <th class="p-3 font-bold text-left">#</th>
@@ -88,11 +93,12 @@
               <th class="p-3 font-bold text-left">Area (sq km)</th>
               <th class="p-3 font-bold text-left">UBX</th>
               <th class="p-3 font-bold text-left">Base File</th>
+              <th class="p-3 font-bold text-left">Action</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody id="flightsTableBody">
             {% for f in flights %}
-            <tr class="border-b border-gray-200">
+            <tr class="border-b border-gray-200 flight-row">
               <td class="p-3">{{ loop.index }} <input type="hidden" name="flight_id[]" value="{{ f.id }}"></td>
               <td class="p-3">
                 <input type="number" name="flight_time[]" value="{{ f.flight_time_min }}"
@@ -110,10 +116,13 @@
                 <input type="text" name="flight_base[]" value="{{ f.drone_base_file_no }}"
                        class="w-full p-2 border border-gray-300 rounded-lg">
               </td>
+              <td class="p-3">
+                <button type="button" onclick="deleteFlightRow(this)" class="py-1 px-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
+              </td>
             </tr>
             {% endfor %}
             {% if not flights %}
-            <tr><td colspan="5" class="p-3 text-gray-600 text-center">No flights recorded.</td></tr>
+            <tr id="noFlightsRow"><td colspan="6" class="p-3 text-gray-600 text-center">No flights recorded.</td></tr>
             {% endif %}
           </tbody>
         </table>
@@ -130,6 +139,7 @@
     function validateForm() {
       let hasError = false;
       const fields = [
+        { id: "report_date", errId: "err_report_date" },
         { id: "pilot_name", errId: "err_pilot_name" },
         { id: "copilot_name", errId: "err_copilot_name" },
         { id: "dgps_used", errId: "err_dgps_used" },
@@ -180,6 +190,54 @@
       }
 
       return !hasError;
+    }
+
+    function addFlightRow() {
+      const tbody = document.getElementById('flightsTableBody');
+      const noFlightsRow = document.getElementById('noFlightsRow');
+      if (noFlightsRow) {
+        noFlightsRow.remove();
+      }
+      const rowCount = tbody.querySelectorAll('.flight-row').length + 1;
+      const newRow = document.createElement('tr');
+      newRow.className = 'border-b border-gray-200 flight-row';
+      newRow.innerHTML = `
+        <td class="p-3">${rowCount} <input type="hidden" name="flight_id[]" value=""></td>
+        <td class="p-3">
+          <input type="number" name="flight_time[]" value=""
+                 class="w-full p-2 border border-gray-300 rounded-lg">
+        </td>
+        <td class="p-3">
+          <input type="number" step="0.001" name="flight_area[]" value=""
+                 class="w-full p-2 border border-gray-300 rounded-lg">
+        </td>
+        <td class="p-3">
+          <input type="text" name="flight_ubx[]" value=""
+                 class="w-full p-2 border border-gray-300 rounded-lg">
+        </td>
+        <td class="p-3">
+          <input type="text" name="flight_base[]" value=""
+                 class="w-full p-2 border border-gray-300 rounded-lg">
+        </td>
+        <td class="p-3">
+          <button type="button" onclick="deleteFlightRow(this)" class="py-1 px-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
+        </td>
+      `;
+      tbody.appendChild(newRow);
+    }
+
+    function deleteFlightRow(button) {
+      const row = button.closest('tr');
+      row.remove();
+      const tbody = document.getElementById('flightsTableBody');
+      const rows = tbody.querySelectorAll('.flight-row');
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr id="noFlightsRow"><td colspan="6" class="p-3 text-gray-600 text-center">No flights recorded.</td></tr>';
+      } else {
+        rows.forEach((row, index) => {
+          row.querySelector('td:first-child').firstChild.textContent = index + 1;
+        });
+      }
     }
 
     document.querySelector("form")?.addEventListener("submit", function(e) {
