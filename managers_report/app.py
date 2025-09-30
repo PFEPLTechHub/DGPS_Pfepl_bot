@@ -1,6 +1,5 @@
 import os
 from datetime import datetime, timedelta, timezone
-
 from dotenv import load_dotenv
 from flask import (
     Flask, render_template, request, redirect, url_for,
@@ -81,7 +80,6 @@ def login():
         flash("Please enter both login and password.", "danger")
         return render_template("login.html", login_prefill=login_id)
 
-    # 4-column manager_logins table: login, password_hash, telegram_id, is_active
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
             "SELECT login, password_hash, telegram_id, is_active "
@@ -98,7 +96,6 @@ def login():
         flash("Invalid credentials.", "danger")
         return render_template("login.html", login_prefill=login_id)
 
-    # Verify the Telegram user is an active admin/manager in users
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
             "SELECT id, role, is_active FROM users WHERE telegram_id=%s",
@@ -110,13 +107,51 @@ def login():
         flash("Your Telegram user isn’t an active admin/manager.", "danger")
         return render_template("login.html", login_prefill=login_id)
 
-    # Store session
     session["manager_login"]   = row["login"]
     session["manager_tg"]      = row["telegram_id"]
     session["manager_user_id"] = u["id"]
     session.permanent = True
 
-    return redirect(url_for("dashboard"))
+    next_url = request.args.get("next") or url_for("dashboard")
+    return redirect(next_url)
+
+@app.route("/telegram-login", methods=["POST"])
+def telegram_login():
+    try:
+        data = request.get_json()
+        telegram_id = data.get("id")
+        if not telegram_id:
+            return jsonify({"ok": False, "error": "No Telegram ID provided"}), 400
+
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute(
+                "SELECT login, telegram_id, is_active "
+                "FROM manager_logins WHERE telegram_id=%s LIMIT 1",
+                (telegram_id,)
+            )
+            row = cur.fetchone()
+
+        if not row or row["is_active"] != 1:
+            return jsonify({"ok": False, "error": "Invalid or inactive Telegram account"}), 401
+
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute(
+                "SELECT id, role, is_active FROM users WHERE telegram_id=%s",
+                (telegram_id,)
+            )
+            u = cur.fetchone()
+
+        if not u or u["is_active"] != 1 or u["role"] not in (0, 1):
+            return jsonify({"ok": False, "error": "Not an active manager"}), 401
+
+        session["manager_login"]   = row["login"]
+        session["manager_tg"]      = row["telegram_id"]
+        session["manager_user_id"] = u["id"]
+        session.permanent = True
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
 
 @app.route("/logout")
 def logout():
@@ -133,30 +168,20 @@ def dashboard():
 @app.route("/view-report")
 @login_required
 def view_report_page():
-    # Placeholder entry page; managers will click through from Dashboard rows
     return render_template("report_detail.html", report=None, flights=[], readonly=True)
 
 @app.route("/edit-report")
 @login_required
 def edit_report_page():
-    # Placeholder entry page; managers will click through from Dashboard rows
     return render_template("report_detail.html", report=None, flights=[], readonly=False)
 
 # ----------------- API: Track data -----------------
 @app.route("/api/track")
 @login_required
 def api_track():
-    """
-    Returns list of employees under this manager for a given date, with submission status.
-    Response:
-    { ok: true, date: "YYYY-MM-DD", rows: [
-        { sr, name, time, status, report_id (optional), employee_telegram_id }
-    ]}
-    """
     date_str = request.args.get("date") or today_ist_str()
     mgr_user_id = session["manager_user_id"]
 
-    # Employees under this manager
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
             "SELECT telegram_id, first_name, last_name, username "
@@ -173,7 +198,6 @@ def api_track():
         lname = (e["last_name"] or "").strip()
         names[e["telegram_id"]] = (fname + " " + lname).strip() or (e["username"] or f"tg:{e['telegram_id']}")
 
-    # Submissions for that date
     report_by_tg = {}
     if tg_ids:
         placeholders = ",".join(["%s"] * len(tg_ids))
@@ -242,7 +266,6 @@ def report_edit(report_id):
     if request.method == "GET":
         return render_template("report_detail.html", report=rep, flights=flights, readonly=False)
 
-    # POST -> update a few editable fields
     pilot   = (request.form.get("pilot_name") or "").strip()
     copilot = (request.form.get("copilot_name") or "").strip()
     remark  = (request.form.get("remark") or "").strip()
@@ -262,5 +285,4 @@ def report_edit(report_id):
 
 # ----------------- Run -----------------
 if __name__ == "__main__":
-    # Production: run under gunicorn/uvicorn; dev: Flask dev server
     app.run(host="0.0.0.0", port=9000, debug=False)

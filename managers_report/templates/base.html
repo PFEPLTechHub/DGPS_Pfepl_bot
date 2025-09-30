@@ -1,34 +1,35 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <title>{% block title %}Manager Dashboard{% endblock %}</title>
-  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
-<body>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="brand">Managers</div>
-      <nav class="nav">
-        <a class="nav-link{% if request.path.startswith('/dashboard') %} active{% endif %}" href="{{ url_for('dashboard') }}">Track</a>
-        <a class="nav-link{% if request.path.startswith('/view-report') %} active{% endif %}" href="{{ url_for('view_report_page') }}">View Report</a>
-        <a class="nav-link{% if request.path.startswith('/edit-report') %} active{% endif %}" href="{{ url_for('edit_report_page') }}">Edit Report</a>
+<body class="bg-gray-100 text-gray-900 font-sans">
+  <div class="flex min-h-screen">
+    {% if session.get('manager_login') %}
+    <aside class="sidebar w-64 bg-gray-900 text-white p-4 flex flex-col">
+      <div class="brand font-bold text-lg mb-4">Managers</div>
+      <nav class="nav flex flex-col gap-2">
+        <a class="nav-link px-3 py-2 rounded-lg hover:bg-gray-800{% if request.path.startswith('/dashboard') %} bg-gray-700{% endif %}" href="{{ url_for('dashboard') }}">Track</a>
+        <a class="nav-link px-3 py-2 rounded-lg hover:bg-gray-800{% if request.path.startswith('/view-report') %} bg-gray-700{% endif %}" href="{{ url_for('view_report_page') }}">View Report</a>
+        <a class="nav-link px-3 py-2 rounded-lg hover:bg-gray-800{% if request.path.startswith('/edit-report') %} bg-gray-700{% endif %}" href="{{ url_for('edit_report_page') }}">Edit Report</a>
       </nav>
-      {% if session.get('manager_login') %}
-      <div class="sidebar-footer">
-        <div class="mgr">👤 {{ session['manager_login'] }}</div>
-        <a class="logout" href="{{ url_for('logout') }}">Logout</a>
+      <div class="sidebar-footer mt-auto pt-2 border-t border-gray-700">
+        <div class="mgr text-sm opacity-90">👤 {{ session['manager_login'] }}</div>
+        <a class="logout text-red-300 text-sm hover:underline" href="{{ url_for('logout') }}">Logout</a>
       </div>
-      {% endif %}
     </aside>
+    {% endif %}
 
-    <main class="content">
+    <main class="content flex-1 p-6 max-w-7xl mx-auto">
       {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
-        <div class="flash-wrap">
+        <div class="flash-wrap mb-4">
           {% for cat, msg in messages %}
-            <div class="flash flash-{{ cat }}">{{ msg }}</div>
+            <div class="flash p-3 rounded-lg {% if cat == 'danger' %}bg-red-100 text-red-800{% else %}bg-green-100 text-green-800{% endif %}">{{ msg }}</div>
           {% endfor %}
         </div>
       {% endif %}

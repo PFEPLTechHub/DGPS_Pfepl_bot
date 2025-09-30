@@ -1,59 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Track — Manager Dashboard{% endblock %}
 {% block content %}
-<h2>Track Daily Submissions</h2>
+<h2 class="text-2xl font-bold mb-6">Track Daily Submissions</h2>
 
-<div class="controls">
-  <label for="datePicker">Date</label>
-  <input id="datePicker" type="date" value="{{ default_date }}">
-  <button id="btnRefresh" class="btn">Refresh</button>
+<div class="controls flex gap-4 items-end mb-6">
+  <div>
+    <label for="datePicker" class="block font-semibold">Select Date</label>
+    <input id="datePicker" type="date" value="{{ default_date }}" class="p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+  </div>
+  <button id="btnRefresh" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold">Refresh</button>
 </div>
 
-<div class="table-wrap">
-  <table class="table" id="trackTable">
+<div class="table-wrap bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+  <table class="table w-full">
     <thead>
-      <tr>
-        <th>Sr. No.</th>
-        <th>Employee Name</th>
-        <th>Submission Time</th>
-        <th>Status</th>
-        <th></th>
+      <tr class="bg-blue-50 text-gray-700">
+        <th class="p-3 font-bold">Sr. No.</th>
+        <th class="p-3 font-bold">Employee Name</th>
+        <th class="p-3 font-bold">Submission Time</th>
+        <th class="p-3 font-bold">Status</th>
+        <th class="p-3 font-bold">Actions</th>
       </tr>
     </thead>
-    <tbody>
-      <!-- rows inserted by JS -->
+    <tbody id="trackTableBody">
+      <!-- Rows inserted by JS -->
     </tbody>
   </table>
 </div>
 {% endblock %}
-
 {% block scripts %}
-<script>
-window.MGR = window.MGR || {};
-MGR.fetchTrack = async function(){
-  const date = document.getElementById('datePicker').value;
-  const res = await fetch(`/api/track?date=${encodeURIComponent(date)}`);
-  if(!res.ok){ alert('Failed to load.'); return; }
-  const data = await res.json();
-  const TB = document.querySelector('#trackTable tbody');
-  TB.innerHTML = '';
-  (data.rows || []).forEach(row => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${row.sr}</td>
-      <td>${row.name}</td>
-      <td>${row.time}</td>
-      <td>${row.status}</td>
-      <td>${
-        row.report_id
-          ? `<a class="link" href="/report/${row.report_id}">View</a> · <a class="link" href="/report/${row.report_id}/edit">Edit</a>`
-          : `—`
-      }</td>
-    `;
-    TB.appendChild(tr);
-  });
-};
-document.getElementById('btnRefresh').addEventListener('click', MGR.fetchTrack);
-document.addEventListener('DOMContentLoaded', MGR.fetchTrack);
-</script>
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}
