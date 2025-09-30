@@ -21,13 +21,6 @@ MGR.fetchTrack = async function() {
             ${row.status}
           </span>
         </td>
-        <td class="p-3">
-          ${row.report_id
-            ? `<a class="text-blue-600 hover:underline" href="/report/${row.report_id}">View</a> | 
-               <a class="text-blue-600 hover:underline" href="/report/${row.report_id}/edit">Edit</a>`
-            : '—'
-          }
-        </td>
       `;
       tbody.appendChild(tr);
     });

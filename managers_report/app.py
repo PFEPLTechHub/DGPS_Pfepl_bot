@@ -37,21 +37,14 @@ def db_conn():
     return cnxpool.get_connection()
 
 # ----------------- Time Helpers -----------------
-UTC = timezone.utc
-IST = timezone(timedelta(hours=5, minutes=30))
-
 def today_ist_str():
-    return datetime.now(IST).strftime("%Y-%m-%d")
+    return datetime.now().strftime("%Y-%m-%d")
 
 def fmt_ist(dt_utc_naive):
-    """Assume DB timestamps are UTC-naive; render as IST string."""
+    """Display timestamp as-is, assuming it's stored in IST."""
     if not dt_utc_naive:
         return "-"
-    if dt_utc_naive.tzinfo is None:
-        aware = dt_utc_naive.replace(tzinfo=UTC)
-    else:
-        aware = dt_utc_naive
-    return aware.astimezone(IST).strftime("%d %b %Y %I:%M %p IST")
+    return dt_utc_naive.strftime("%d %b %Y %I:%M %p IST")
 
 # ----------------- Auth -----------------
 def login_required(view):
@@ -99,8 +92,25 @@ def login():
         flash("Incorrect password.", "danger")
         return render_template("login.html", login_prefill=login_id)
 
+    # Fetch manager's name from users table
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute(
+            "SELECT first_name, last_name "
+            "FROM users WHERE telegram_id = %s LIMIT 1",
+            (row["telegram_id"],)
+        )
+        user = cur.fetchone()
+    
+    # Set manager name (fallback to login if user not found)
+    manager_name = (
+        f"{user['first_name']} {user['last_name']}".strip() 
+        if user and user["first_name"] 
+        else row["login"]
+    )
+
     session["manager_login"] = row["login"]
     session["manager_tg"] = row["telegram_id"]
+    session["manager_name"] = manager_name
     session.permanent = True
 
     next_url = request.args.get("next") or url_for("dashboard")
@@ -176,7 +186,6 @@ def api_track():
             "name": names.get(tg_id, f"tg:{tg_id}"),
             "time": fmt_ist(r["created_at"]) if r else "-",
             "status": "Submitted" if r else "Not Submitted",
-            "report_id": r["id"] if r else None
         })
 
     return jsonify({"ok": True, "date": date_str, "rows": rows})

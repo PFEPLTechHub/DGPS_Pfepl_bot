@@ -18,7 +18,7 @@
         <a class="nav-link px-3 py-2 rounded-lg hover:bg-gray-800{% if request.path.startswith('/edit-report') %} bg-gray-700{% endif %}" href="{{ url_for('edit_report_page') }}">Edit Report</a>
       </nav>
       <div class="sidebar-footer mt-auto pt-2 border-t border-gray-700">
-        <div class="mgr text-sm opacity-90">👤 {{ session['manager_login'] }}</div>
+        <div class="mgr text-sm opacity-90">👤 {{ session['manager_name'] }}</div>
         <a class="logout text-red-300 text-sm hover:underline" href="{{ url_for('logout') }}">Logout</a>
       </div>
     </aside>

@@ -1,36 +1,97 @@
 {% extends "base.html" %}
-{% block title %}Track — Manager Dashboard{% endblock %}
+{% if report %}
+  {% set page_title = 'Report #' ~ report.id %}
+{% else %}
+  {% set page_title = readonly and 'View Report' or 'Edit Report' %}
+{% endif %}
+{% block title %}{{ page_title }} — Manager Dashboard{% endblock %}
 {% block content %}
 <div class="py-6">
-  <h2 class="text-2xl font-bold text-gray-800 mb-6">Track Daily Submissions</h2>
+  <h2 class="text-2xl font-bold text-gray-800 mb-6">{{ page_title }}</h2>
 
-  <div class="flex gap-4 items-end mb-6">
-    <div>
-      <label for="datePicker" class="block text-sm font-medium text-gray-700">Select Date</label>
-      <input id="datePicker" type="date" value="{{ default_date }}" 
-             class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+  {% if not report %}
+  <p class="text-gray-600">Open a report from the <a href="{{ url_for('dashboard') }}" class="text-blue-600 hover:underline">Track</a> page.</p>
+  {% else %}
+  <div class="grid gap-6 lg:grid-cols-2">
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+      <h3 class="text-lg font-semibold text-gray-800 mb-4">Summary</h3>
+      <div class="space-y-2">
+        <div><span class="font-medium">Date:</span> {{ report.report_date }}</div>
+        <div><span class="font-medium">Employee TG:</span> {{ report.employee_telegram_id }}</div>
+        <div><span class="font-medium">Site:</span> {{ report.site_name }}</div>
+        <div><span class="font-medium">Drone:</span> {{ report.drone_name }}</div>
+        <div><span class="font-medium">Pilot:</span> {{ report.pilot_name }}</div>
+        <div><span class="font-medium">Copilot:</span> {{ report.copilot_name }}</div>
+        <div><span class="font-medium">Base Height (m):</span> {{ '%.2f'|format(report.base_height_m) }}</div>
+        <div><span class="font-medium">Created:</span> {{ report.created_at }}</div>
+        <div><span class="font-medium">DGPS Used:</span> {{ report.dgps_used_json }}</div>
+        <div><span class="font-medium">DGPS Operators:</span> {{ report.dgps_operators_json }}</div>
+        <div><span class="font-medium">Grid Numbers:</span> {{ report.grid_numbers_json }}</div>
+        <div><span class="font-medium">GCP Points:</span> {{ report.gcp_points_json }}</div>
+        <div><span class="font-medium">Total Area (sq km):</span> {{ '%.3f'|format(report.total_area_sq_km) }}</div>
+        <div><span class="font-medium">Total Time (min):</span> {{ report.total_time_min }}</div>
+        <div><span class="font-medium">Remark:</span> {{ report.remark or '-' }}</div>
+      </div>
     </div>
-    <button id="btnRefresh" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">Refresh</button>
-  </div>
 
-  <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-    <table class="w-full table-auto">
-      <thead>
-        <tr class="bg-blue-50 text-gray-700">
-          <th class="p-3 font-bold text-left">Sr. No.</th>
-          <th class="p-3 font-bold text-left">Employee Name</th>
-          <th class="p-3 font-bold text-left">Submission Time</th>
-          <th class="p-3 font-bold text-left">Status</th>
-          <th class="p-3 font-bold text-left">Actions</th>
-        </tr>
-      </thead>
-      <tbody id="trackTableBody">
-        <!-- Rows inserted by JS -->
-      </tbody>
-    </table>
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+      <h3 class="text-lg font-semibold text-gray-800 mb-4">Flights</h3>
+      <table class="w-full table-auto">
+        <thead>
+          <tr class="bg-blue-50 text-gray-700">
+            <th class="p-3 font-bold text-left">#</th>
+            <th class="p-3 font-bold text-left">Time (min)</th>
+            <th class="p-3 font-bold text-left">Area (sq km)</th>
+            <th class="p-3 font-bold text-left">UBX</th>
+            <th class="p-3 font-bold text-left">Base File</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for f in flights %}
+          <tr class="border-b border-gray-200">
+            <td class="p-3">{{ loop.index }}</td>
+            <td class="p-3">{{ f.flight_time_min }}</td>
+            <td class="p-3">{{ '%.3f'|format(f.area_sq_km) }}</td>
+            <td class="p-3">{{ f.uav_rover_file }}</td>
+            <td class="p-3">{{ f.drone_base_file_no }}</td>
+          </tr>
+          {% endfor %}
+          {% if not flights %}
+          <tr><td colspan="5" class="p-3 text-gray-600 text-center">No flights recorded.</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+
+    {% if not readonly %}
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6">
+      <h3 class="text-lg font-semibold text-gray-800 mb-4">Edit Fields</h3>
+      <form method="post" action="{{ url_for('report_edit', report_id=report.id) }}" class="space-y-4">
+        <div>
+          <label for="pilot_name" class="block text-sm font-medium text-gray-700">Pilot</label>
+          <input id="pilot_name" type="text" name="pilot_name" value="{{ report.pilot_name or '' }}" 
+                 class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label for="copilot_name" class="block text-sm font-medium text-gray-700">Copilot</label>
+          <input id="copilot_name" type="text" name="copilot_name" value="{{ report.copilot_name or '' }}" 
+                 class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label for="base_height_m" class="block text-sm font-medium text-gray-700">Base Height (m)</label>
+          <input id="base_height_m" type="number" step="0.01" name="base_height_m" value="{{ report.base_height_m }}" 
+                 class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+        </div>
+        <div>
+          <label for="remark" class="block text-sm font-medium text-gray-700">Remark</label>
+          <textarea id="remark" name="remark" rows="4" 
+                    class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">{{ report.remark or '' }}</textarea>
+        </div>
+        <button type="submit" class="w-full py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">Save Changes</button>
+      </form>
+    </div>
+    {% endif %}
   </div>
+  {% endif %}
 </div>
-{% endblock %}
-{% block scripts %}
-<script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}
