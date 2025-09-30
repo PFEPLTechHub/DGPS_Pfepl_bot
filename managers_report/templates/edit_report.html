@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Edit Report — Manager Dashboard{% endblock %}
+{% block content %}
+<div class="py-6">
+  <h2 class="text-2xl font-bold text-gray-800 mb-6">Edit Report</h2>
+
+  <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 mb-6">
+    <form id="filterForm" method="post" class="flex gap-4 flex-wrap">
+      <div>
+        <label for="datePicker" class="block text-sm font-medium text-gray-700">Select Date</label>
+        <input id="datePicker" type="date" name="date" value="{{ selected_date }}"
+               class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label for="employeeSelect" class="block text-sm font-medium text-gray-700">Select Employee</label>
+        <select id="employeeSelect" name="employee"
+                class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          <option value="">-- Select Employee --</option>
+          {% for emp in employees %}
+          <option value="{{ emp.telegram_id }}" {% if emp.telegram_id == selected_employee %}selected{% endif %}>
+            {{ emp.name }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <button type="submit" id="btnFilter"
+                class="mt-6 py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          Filter Reports
+        </button>
+      </div>
+    </form>
+  </div>
+
+  <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+    <table class="w-full table-auto">
+      <thead>
+        <tr class="bg-blue-50 text-gray-700">
+          <th class="p-3 font-bold text-left">Report ID</th>
+          <th class="p-3 font-bold text-left">Date</th>
+          <th class="p-3 font-bold text-left">Site</th>
+          <th class="p-3 font-bold text-left">Drone</th>
+          <th class="p-3 font-bold text-left">Created At</th>
+          <th class="p-3 font-bold text-left">Actions</th>
+        </tr>
+      </thead>
+      <tbody id="reportsTableBody">
+        <!-- Rows inserted by JS -->
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}

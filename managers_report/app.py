@@ -1,5 +1,7 @@
 import os
-from datetime import datetime, timedelta, timezone
+import uuid
+import logging
+from datetime import datetime
 from dotenv import load_dotenv
 from flask import (
     Flask, render_template, request, redirect, url_for,
@@ -17,6 +19,10 @@ MYSQL_PORT = int(os.getenv("MYSQL_PORT", "3306"))
 MYSQL_DB   = os.getenv("MYSQL_DB", "tg_staffbot")
 MYSQL_USER = os.getenv("MYSQL_USER", "root")
 MYSQL_PASS = os.getenv("MYSQL_PASS", "root@303")
+
+# Setup logging
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
 
 # ----------------- App -----------------
 app = Flask(__name__, template_folder="templates", static_folder="static")
@@ -36,6 +42,18 @@ cnxpool = pooling.MySQLConnectionPool(pool_name="mgrpool", pool_size=5, **dbconf
 def db_conn():
     return cnxpool.get_connection()
 
+# ----------------- Check for session_token column -----------------
+def has_session_token_column():
+    try:
+        with db_conn() as conn, conn.cursor() as cur:
+            cur.execute("SHOW COLUMNS FROM manager_logins LIKE 'session_token'")
+            return bool(cur.fetchone())
+    except Exception as e:
+        logger.warning(f"Error checking session_token column: {e}")
+        return False
+
+SESSION_TOKEN_ENABLED = has_session_token_column()
+
 # ----------------- Time Helpers -----------------
 def today_ist_str():
     return datetime.now().strftime("%Y-%m-%d")
@@ -53,6 +71,20 @@ def login_required(view):
     def wrapped(*args, **kwargs):
         if not session.get("manager_login"):
             return redirect(url_for("login", next=request.path))
+        if SESSION_TOKEN_ENABLED:
+            try:
+                with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+                    cur.execute(
+                        "SELECT session_token FROM manager_logins WHERE login = %s LIMIT 1",
+                        (session["manager_login"],)
+                    )
+                    row = cur.fetchone()
+                    if not row or row["session_token"] != session.get("session_token"):
+                        session.clear()
+                        flash("Session expired. Please log in again.", "danger")
+                        return redirect(url_for("login", next=request.path))
+            except Exception as e:
+                logger.warning(f"Session validation error: {e}")
         return view(*args, **kwargs)
     return wrapped
 
@@ -75,7 +107,8 @@ def login():
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
             "SELECT login, password, telegram_id, is_active "
-            "FROM manager_logins WHERE login = %s LIMIT 1",
+            + (", session_token" if SESSION_TOKEN_ENABLED else "") +
+            " FROM manager_logins WHERE login = %s LIMIT 1",
             (login_id,)
         )
         row = cur.fetchone()
@@ -91,6 +124,18 @@ def login():
     if row["password"] != password:
         flash("Incorrect password.", "danger")
         return render_template("login.html", login_prefill=login_id)
+
+    # Generate new session token if enabled
+    new_token = str(uuid.uuid4()) if SESSION_TOKEN_ENABLED else None
+    if SESSION_TOKEN_ENABLED:
+        try:
+            with db_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE manager_logins SET session_token = %s WHERE login = %s",
+                    (new_token, login_id)
+                )
+        except Exception as e:
+            logger.warning(f"Failed to update session_token: {e}")
 
     # Fetch manager's name from users table
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
@@ -111,6 +156,8 @@ def login():
     session["manager_login"] = row["login"]
     session["manager_tg"] = row["telegram_id"]
     session["manager_name"] = manager_name
+    if SESSION_TOKEN_ENABLED:
+        session["session_token"] = new_token
     session.permanent = True
 
     next_url = request.args.get("next") or url_for("dashboard")
@@ -118,6 +165,15 @@ def login():
 
 @app.route("/logout")
 def logout():
+    if session.get("manager_login") and SESSION_TOKEN_ENABLED:
+        try:
+            with db_conn() as conn, conn.cursor() as cur:
+                cur.execute(
+                    "UPDATE manager_logins SET session_token = NULL WHERE login = %s",
+                    (session["manager_login"],)
+                )
+        except Exception as e:
+            logger.warning(f"Failed to clear session_token: {e}")
     session.clear()
     return redirect(url_for("login"))
 
@@ -133,10 +189,38 @@ def dashboard():
 def view_report_page():
     return render_template("report_detail.html", report=None, flights=[], readonly=True)
 
-@app.route("/edit-report")
+@app.route("/edit-report", methods=["GET", "POST"])
 @login_required
 def edit_report_page():
-    return render_template("report_detail.html", report=None, flights=[], readonly=False)
+    """Show date picker and employee dropdown to filter reports."""
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute(
+            "SELECT u.telegram_id, u.first_name, u.last_name, u.username "
+            "FROM users u "
+            "WHERE u.role = 2 AND u.is_active = 1 AND u.manager_id = "
+            "(SELECT id FROM users WHERE telegram_id = %s LIMIT 1) "
+            "ORDER BY u.first_name, u.last_name, u.id",
+            (session["manager_tg"],)
+        )
+        emps = cur.fetchall()
+
+    employees = [
+        {
+            "telegram_id": e["telegram_id"],
+            "name": (f"{e['first_name']} {e['last_name']}".strip() or e["username"] or f"tg:{e['telegram_id']}")
+        }
+        for e in emps
+    ]
+
+    selected_date = request.form.get("date") or today_ist_str()
+    selected_employee = request.form.get("employee") or ""
+
+    return render_template(
+        "edit_report.html",
+        employees=employees,
+        selected_date=selected_date,
+        selected_employee=selected_employee
+    )
 
 # ----------------- API: Track data -----------------
 @app.route("/api/track")
@@ -190,6 +274,40 @@ def api_track():
 
     return jsonify({"ok": True, "date": date_str, "rows": rows})
 
+# ----------------- API: Reports by date and employee -----------------
+@app.route("/api/reports")
+@login_required
+def api_reports():
+    date_str = request.args.get("date") or today_ist_str()
+    employee_tg_id = request.args.get("employee") or ""
+    mgr_tg_id = session["manager_tg"]
+
+    if not employee_tg_id:
+        return jsonify({"ok": True, "reports": []})
+
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        # Verify employee is under this manager
+        cur.execute(
+            "SELECT 1 FROM users u "
+            "WHERE u.telegram_id = %s AND u.role = 2 AND u.is_active = 1 AND u.manager_id = "
+            "(SELECT id FROM users WHERE telegram_id = %s LIMIT 1) LIMIT 1",
+            (employee_tg_id, mgr_tg_id)
+        )
+        if not cur.fetchone():
+            return jsonify({"ok": True, "reports": []})
+
+        # Fetch reports
+        cur.execute(
+            "SELECT id, report_date, site_name, drone_name, pilot_name, copilot_name, "
+            "base_height_m, created_at, dgps_used_json, dgps_operators_json, "
+            "grid_numbers_json, gcp_points_json, total_area_sq_km, total_time_min, remark "
+            "FROM reports WHERE report_date = %s AND employee_telegram_id = %s",
+            (date_str, employee_tg_id)
+        )
+        reports = cur.fetchall()
+
+    return jsonify({"ok": True, "reports": reports})
+
 # ----------------- Report detail (view/edit) -----------------
 def _get_report(report_id: int):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
@@ -225,24 +343,101 @@ def report_edit(report_id):
     rep, flights = _get_report(report_id)
     if not rep:
         flash("Report not found.", "danger")
-        return redirect(url_for("dashboard"))
+        return redirect(url_for("edit_report_page"))
 
     if request.method == "GET":
         return render_template("report_detail.html", report=rep, flights=flights, readonly=False)
 
+    # Collect and validate form data
     pilot = (request.form.get("pilot_name") or "").strip()
     copilot = (request.form.get("copilot_name") or "").strip()
     remark = (request.form.get("remark") or "").strip()
+    dgps_used = (request.form.get("dgps_used") or "").strip()
+    dgps_operators = (request.form.get("dgps_operators") or "").strip()
+    grid_numbers = (request.form.get("grid_numbers") or "").strip()
+    gcp_points = (request.form.get("gcp_points") or "").strip()
     try:
         base_h = float(request.form.get("base_height_m") or rep["base_height_m"])
     except Exception:
         base_h = rep["base_height_m"]
 
+    # Validate inputs
+    errors = []
+    if not pilot:
+        errors.append("Pilot name is required.")
+    if not copilot:
+        errors.append("Copilot name is required.")
+    if not remark:
+        errors.append("Remark is required.")
+    if not dgps_used:
+        errors.append("DGPS used is required.")
+    if not dgps_operators:
+        errors.append("DGPS operators is required.")
+    if not grid_numbers:
+        errors.append("Grid numbers is required.")
+    if not gcp_points:
+        errors.append("GCP points is required.")
+
+    # Validate flights
+    flight_ids = request.form.getlist("flight_id[]")
+    flight_times = request.form.getlist("flight_time[]")
+    flight_areas = request.form.getlist("flight_area[]")
+    flight_ubxs = request.form.getlist("flight_ubx[]")
+    flight_bases = request.form.getlist("flight_base[]")
+    flights_data = []
+    for i in range(len(flight_ids)):
+        try:
+            time = float(flight_times[i]) if flight_times[i] else 0
+            area = float(flight_areas[i]) if flight_areas[i] else 0
+            ubx = (flight_ubxs[i] or "").strip()
+            base = (flight_bases[i] or "").strip()
+            if time < 1:
+                errors.append(f"Flight {i+1}: Time must be ≥ 1.")
+            if area <= 0:
+                errors.append(f"Flight {i+1}: Area must be > 0.")
+            if not ubx:
+                errors.append(f"Flight {i+1}: UBX required.")
+            if not base:
+                errors.append(f"Flight {i+1}: Base file required.")
+            flights_data.append({
+                "id": flight_ids[i] if flight_ids[i] else None,
+                "flight_time_min": time,
+                "area_sq_km": area,
+                "uav_rover_file": ubx,
+                "drone_base_file_no": base
+            })
+        except ValueError:
+            errors.append(f"Flight {i+1}: Invalid time or area.")
+
+    if errors:
+        for err in errors:
+            flash(err, "danger")
+        return render_template("report_detail.html", report=rep, flights=flights, readonly=False)
+
+    # Update report
     with db_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "UPDATE reports SET pilot_name = %s, copilot_name = %s, base_height_m = %s, remark = %s WHERE id = %s",
-            (pilot or rep["pilot_name"], copilot or rep["copilot_name"], base_h, remark, report_id)
+            "UPDATE reports SET pilot_name = %s, copilot_name = %s, base_height_m = %s, "
+            "dgps_used_json = %s, dgps_operators_json = %s, grid_numbers_json = %s, "
+            "gcp_points_json = %s, remark = %s, total_time_min = %s, total_area_sq_km = %s "
+            "WHERE id = %s",
+            (
+                pilot, copilot, base_h,
+                dgps_used, dgps_operators, grid_numbers, gcp_points,
+                remark,
+                sum(f["flight_time_min"] for f in flights_data),
+                sum(f["area_sq_km"] for f in flights_data),
+                report_id
+            )
         )
+        # Update flights
+        cur.execute("DELETE FROM report_flights WHERE report_id = %s", (report_id,))
+        for f in flights_data:
+            cur.execute(
+                "INSERT INTO report_flights (report_id, flight_time_min, area_sq_km, uav_rover_file, drone_base_file_no) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (report_id, f["flight_time_min"], f["area_sq_km"], f["uav_rover_file"], f["drone_base_file_no"])
+            )
 
     flash("Report updated.", "success")
     return redirect(url_for("report_detail", report_id=report_id))
