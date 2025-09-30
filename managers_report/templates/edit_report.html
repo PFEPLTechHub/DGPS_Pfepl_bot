@@ -54,8 +54,16 @@
   <div id="viewModal" class="fixed inset-0 hidden z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center">
     <div class="bg-white p-6 rounded-xl shadow-lg max-w-2xl w-full max-h-screen overflow-y-auto">
       <h3 class="text-lg font-semibold text-gray-800 mb-4">Report Preview</h3>
-      <div id="modalContent"></div>
+      <div id="viewModalContent"></div>
       <button onclick="document.getElementById('viewModal').classList.add('hidden')" class="mt-4 py-2 px-4 bg-gray-600 text-white rounded-lg hover:bg-gray-700">Close</button>
+    </div>
+  </div>
+
+  <!-- Edit Modal -->
+  <div id="editModal" class="fixed inset-0 hidden z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center">
+    <div class="bg-white p-6 rounded-xl shadow-lg max-w-2xl w-full max-h-screen overflow-y-auto">
+      <h3 class="text-lg font-semibold text-gray-800 mb-4">Edit Report</h3>
+      <div id="editModalContent"></div>
     </div>
   </div>
 </div>

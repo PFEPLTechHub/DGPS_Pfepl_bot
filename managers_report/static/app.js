@@ -51,7 +51,8 @@ MGR.fetchReports = async function() {
         <td class="p-3">${report.created_at}</td>
         <td class="p-3">
           <a class="text-blue-600 hover:underline cursor-pointer" onclick="MGR.viewReport(${report.id})">View</a> |
-          <a class="text-blue-600 hover:underline" href="/report/${report.id}/edit">Edit</a>
+          <a class="text-blue-600 hover:underline cursor-pointer" onclick="MGR.editReport(${report.id})">Edit</a> |
+          <a class="text-red-600 hover:underline cursor-pointer" onclick="MGR.deleteReport(${report.id})">Delete</a>
         </td>
       `;
       tbody.appendChild(tr);
@@ -66,10 +67,62 @@ MGR.viewReport = async function(reportId) {
     const res = await fetch(`/report/${reportId}/preview`);
     if (!res.ok) throw new Error('Failed to load report');
     const html = await res.text();
-    document.getElementById('modalContent').innerHTML = html;
+    document.getElementById('viewModalContent').innerHTML = html;
     document.getElementById('viewModal').classList.remove('hidden');
   } catch (err) {
     alert('Error loading report: ' + err.message);
+  }
+};
+
+MGR.editReport = async function(reportId) {
+  try {
+    const res = await fetch(`/report/${reportId}/edit`);
+    if (!res.ok) throw new Error('Failed to load edit form');
+    const html = await res.text();
+    document.getElementById('editModalContent').innerHTML = html;
+    document.getElementById('editModal').classList.remove('hidden');
+    // Re-attach form validation
+    document.querySelector("#editModal form")?.addEventListener("submit", async function(e) {
+      e.preventDefault();
+      if (!window.validateForm()) return;
+      const form = e.target;
+      try {
+        const res = await fetch(form.action, {
+          method: 'POST',
+          body: new FormData(form),
+        });
+        const data = await res.json();
+        if (data.ok) {
+          alert(data.message);
+          document.getElementById('editModal').classList.add('hidden');
+          MGR.fetchReports();
+        } else {
+          alert('Error: ' + (data.message || 'Failed to update report'));
+        }
+      } catch (err) {
+        alert('Error updating report: ' + err.message);
+      }
+    });
+  } catch (err) {
+    alert('Error loading edit form: ' + err.message);
+  }
+};
+
+MGR.deleteReport = async function(reportId) {
+  if (!confirm('Are you sure you want to delete this report?')) return;
+  try {
+    const res = await fetch(`/report/${reportId}/delete`, {
+      method: 'POST',
+    });
+    const data = await res.json();
+    if (data.ok) {
+      alert(data.message);
+      MGR.fetchReports();
+    } else {
+      alert('Error: ' + (data.message || 'Failed to delete report'));
+    }
+  } catch (err) {
+    alert('Error deleting report: ' + err.message);
   }
 };
 

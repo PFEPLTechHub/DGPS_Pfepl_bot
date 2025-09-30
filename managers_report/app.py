@@ -147,7 +147,7 @@ def login():
             (row["telegram_id"],)
         )
         user = cur.fetchone()
-    
+
     # Set manager name (fallback to login if user not found)
     manager_name = (
         f"{user['first_name']} {user['last_name']}".strip() 
@@ -310,7 +310,7 @@ def api_reports():
 
     return jsonify({"ok": True, "reports": reports})
 
-# ----------------- Report detail (view/edit/preview) -----------------
+# ----------------- Report detail (view/edit/delete) -----------------
 def _get_report(report_id: int):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
@@ -346,7 +346,7 @@ def report_preview(report_id):
     if not rep:
         flash("Report not found.", "danger")
         return "", 404
-    return render_template("report_preview.html", report=rep, flights=flights)
+    return render_template("report_detail.html", report=rep, flights=flights)
 
 @app.route("/report/<int:report_id>/edit", methods=["GET", "POST"])
 @login_required
@@ -357,7 +357,7 @@ def report_edit(report_id):
         return redirect(url_for("edit_report_page"))
 
     if request.method == "GET":
-        return render_template("report_detail.html", report=rep, flights=flights, readonly=False)
+        return render_template("report_edit.html", report=rep, flights=flights)
 
     # Collect and validate form data
     pilot = (request.form.get("pilot_name") or "").strip()
@@ -423,7 +423,7 @@ def report_edit(report_id):
     if errors:
         for err in errors:
             flash(err, "danger")
-        return render_template("report_detail.html", report=rep, flights=flights, readonly=False)
+        return render_template("report_edit.html", report=rep, flights=flights)
 
     # Update report
     with db_conn() as conn, conn.cursor() as cur:
@@ -451,7 +451,16 @@ def report_edit(report_id):
             )
 
     flash("Report updated.", "success")
-    return redirect(url_for("edit_report_page", date=rep["report_date"]))
+    return jsonify({"ok": True, "message": "Report updated."})
+
+@app.route("/report/<int:report_id>/delete", methods=["POST"])
+@login_required
+def report_delete(report_id):
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM reports WHERE id = %s", (report_id,))
+        # report_flights are cascaded by FK constraint
+    flash("Report deleted.", "success")
+    return jsonify({"ok": True, "message": "Report deleted."})
 
 # ----------------- Run -----------------
 if __name__ == "__main__":
