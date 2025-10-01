@@ -3,47 +3,25 @@
 
 {% block content %}
 <div class="py-6">
+
   <!-- Top controls -->
   <div class="flex items-center justify-between mb-4">
     <h2 class="text-2xl font-bold text-gray-800">View Reports</h2>
-    <button id="vrRefreshBtn" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+    <button id="vrRefreshBtn"
+            class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
       Refresh
     </button>
   </div>
 
-  <!-- Tab bar (equal width) -->
-  <nav class="w-full rounded-xl border border-gray-200 bg-white shadow-sm mb-4">
-    <ul role="tablist" aria-label="View reports tabs" class="grid grid-cols-4 divide-x divide-gray-200">
-      <li>
-        <a role="tab" href="javascript:void(0)"
-           data-tab="date"
-           class="vr-tab-btn active block w-full text-center py-3 text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 focus:outline-none">
-          Date
-        </a>
-      </li>
-      <li>
-        <a role="tab" href="javascript:void(0)"
-           data-tab="employee"
-           class="vr-tab-btn block w-full text-center py-3 text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 focus:outline-none">
-          Employee
-        </a>
-      </li>
-      <li>
-        <a role="tab" href="javascript:void(0)"
-           data-tab="sites"
-           class="vr-tab-btn block w-full text-center py-3 text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 focus:outline-none">
-          Sites
-        </a>
-      </li>
-      <li>
-        <a role="tab" href="javascript:void(0)"
-           data-tab="drones"
-           class="vr-tab-btn block w-full text-center py-3 text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 focus:outline-none">
-          Drones
-        </a>
-      </li>
-    </ul>
-  </nav>
+  <!-- Tabs -->
+  <div class="tabbar sticky top-0 z-10 bg-transparent mb-3">
+    <nav class="vr-tabs flex gap-2 p-1 rounded-xl bg-white border border-gray-200 shadow-sm">
+      <button class="vr-tab-btn active flex-1" data-tab="date">Date</button>
+      <button class="vr-tab-btn flex-1" data-tab="employee">Employee</button>
+      <button class="vr-tab-btn flex-1" data-tab="sites">Sites</button>
+      <button class="vr-tab-btn flex-1" data-tab="drones">Drones</button>
+    </nav>
+  </div>
 
   <!-- Panels -->
   <div class="vr-panels space-y-6">
@@ -54,7 +32,8 @@
         <div class="flex flex-wrap items-end gap-4">
           <div>
             <label class="block text-sm font-medium text-gray-700">Mode</label>
-            <select id="vrDateMode" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select id="vrDateMode"
+                    class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="single" selected>Single Date</option>
               <option value="range">Date Range</option>
             </select>
@@ -62,23 +41,27 @@
 
           <div id="vrDateSingleWrap">
             <label class="block text-sm font-medium text-gray-700">Date</label>
-            <input type="date" id="vrDateSingle" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="date" id="vrDateSingle"
+                   class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
           </div>
 
           <div id="vrDateRangeWrap" class="hidden">
             <div class="flex items-end gap-3">
               <div>
                 <label class="block text-sm font-medium text-gray-700">From</label>
-                <input type="date" id="vrDateFrom" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="date" id="vrDateFrom"
+                       class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700">To</label>
-                <input type="date" id="vrDateTo" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="date" id="vrDateTo"
+                       class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
               </div>
             </div>
           </div>
 
-          <button id="vrDateFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          <button id="vrDateFilter"
+                  class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
             Apply
           </button>
         </div>
@@ -111,14 +94,16 @@
         <div class="flex flex-wrap items-end gap-4">
           <div>
             <label class="block text-sm font-medium text-gray-700">Employee</label>
-            <select id="vrEmpSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select id="vrEmpSelect"
+                    class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">-- Select Employee --</option>
               {% for e in employees %}
                 <option value="{{ e.telegram_id }}">{{ e.name }}</option>
               {% endfor %}
             </select>
           </div>
-          <button id="vrEmpFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          <button id="vrEmpFilter"
+                  class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
             Apply
           </button>
         </div>
@@ -152,7 +137,8 @@
         <div class="flex flex-wrap items-end gap-4">
           <div>
             <label class="block text-sm font-medium text-gray-700">Site</label>
-            <select id="vrSiteSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select id="vrSiteSelect"
+                    class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">-- Select Site --</option>
               {% for s in sites %}
                 <option value="{{ s.name }}">{{ s.name }}</option>
@@ -161,9 +147,11 @@
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Date (optional)</label>
-            <input type="date" id="vrSiteDate" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="date" id="vrSiteDate"
+                   class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
           </div>
-          <button id="vrSiteFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          <button id="vrSiteFilter"
+                  class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
             Apply
           </button>
         </div>
@@ -201,7 +189,8 @@
         <div class="flex flex-wrap items-end gap-4">
           <div>
             <label class="block text-sm font-medium text-gray-700">Drone</label>
-            <select id="vrDroneSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select id="vrDroneSelect"
+                    class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
               <option value="">-- Select Drone --</option>
               {% for d in drones %}
                 <option value="{{ d.name }}">{{ d.name }}</option>
@@ -210,9 +199,11 @@
           </div>
           <div>
             <label class="block text-sm font-medium text-gray-700">Date (optional)</label>
-            <input type="date" id="vrDroneDate" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="date" id="vrDroneDate"
+                   class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
           </div>
-          <button id="vrDroneFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          <button id="vrDroneFilter"
+                  class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
             Apply
           </button>
         </div>
@@ -247,22 +238,29 @@
   </div>
 </div>
 
-<!-- VIEW MODAL (needed for MGR.viewReport) -->
-<div id="viewModal" class="fixed inset-0 z-50 hidden">
-  <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('viewModal').classList.add('hidden')"></div>
-  <div class="relative mx-auto my-8 max-w-3xl w-[92%] bg-white rounded-xl shadow-xl overflow-hidden">
-    <div class="flex items-center justify-between px-4 py-3 border-b">
+<!-- VIEW MODAL (scrollable) -->
+<div id="viewModal" class="fixed inset-0 z-50 hidden flex items-center justify-center">
+  <!-- overlay -->
+  <div class="absolute inset-0 bg-black/50" aria-hidden="true"
+       onclick="document.getElementById('viewModal').classList.add('hidden')"></div>
+
+  <!-- panel -->
+  <div class="relative z-10 mx-auto max-w-3xl w-[92%] h-[90vh] bg-white rounded-xl shadow-xl flex flex-col">
+    <!-- header -->
+    <div class="flex items-center justify-between px-4 py-3 border-b flex-shrink-0">
       <h3 class="text-lg font-semibold text-gray-800">Report Preview</h3>
-      <button class="text-gray-500 hover:text-gray-700" onclick="document.getElementById('viewModal').classList.add('hidden')">✕</button>
+      <button class="text-gray-500 hover:text-gray-700"
+              onclick="document.getElementById('viewModal').classList.add('hidden')">✕</button>
     </div>
-    <div id="viewModalContent" class="max-h-[80vh] overflow-y-auto p-4">
-      <!-- report html injected here -->
+
+    <!-- body (scrolls) -->
+    <div id="viewModalContent" class="flex-1 overflow-y-auto p-4">
+      <!-- report html is injected here by app.js -->
     </div>
   </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-{# make sure app.js is loaded, either here or in base.html #}
-<script src="{{ url_for('static', filename='app.js') }}"></script>
+<!-- app.js handles the tab logic, fetching and modal wiring -->
 {% endblock %}

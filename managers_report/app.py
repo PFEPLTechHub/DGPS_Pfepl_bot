@@ -425,8 +425,13 @@ def report_preview(report_id):
     rep, flights, _, _ = _get_report(report_id)
     if not rep:
         flash("Report not found.", "danger")
-        return "", 404
+        return ("", 404)
+    # If modal/JS asks for a fragment, return only the inner markup
+    if request.args.get("fragment") == "1" or request.headers.get("X-Requested-With") == "fetch":
+        return render_template("report_fragment.html", report=rep, flights=flights)
+    # otherwise return the full standalone page (what you already had)
     return render_template("report_detail.html", report=rep, flights=flights)
+
 
 @app.route("/report/<int:report_id>/edit", methods=["GET", "POST"])
 @login_required

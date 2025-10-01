@@ -137,12 +137,16 @@ MGR.fetchReports = async function() {
 // -------------------- Report Modals --------------------
 MGR.viewReport = async function(reportId) {
   try {
-    const res = await fetch(`/report/${reportId}/preview`);
+    const res = await fetch(`/report/${reportId}/preview?fragment=1`, {
+      headers: { 'X-Requested-With': 'fetch' }
+    });
     if (!res.ok) throw new Error('Failed to load report');
     const html = await res.text();
-    const modalContent = document.getElementById('viewModalContent');
+
     const modal = document.getElementById('viewModal');
-    if (!modalContent || !modal) return;
+    const modalContent = document.getElementById('viewModalContent');
+    if (!modal || !modalContent) return;
+
     modalContent.innerHTML = html;
     modal.classList.remove('hidden');
   } catch (err) {
@@ -150,6 +154,7 @@ MGR.viewReport = async function(reportId) {
     console.error('Error in viewReport:', err);
   }
 };
+
 
 MGR.editReport = async function(reportId) {
   try {
