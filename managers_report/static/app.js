@@ -13,8 +13,8 @@ window.validateForm = function(formId = 'editForm') {
     { id: "copilot_name", errId: "err_copilot_name", msg: "Copilot name is required" },
     { id: "dgps_used", errId: "err_dgps_used", msg: "DGPS used is required" },
     { id: "dgps_operators", errId: "err_dgps_operators", msg: "DGPS operators is required" },
-    { id: "grid_numbers", errId: "err_grid_numbers", msg: "Grid numbers is required" },
-    { id: "gcp_points", errId: "err_gcp_points", msg: "GCP points is required" },
+    { id: "grid_numbers", errId: "err_grid_numbers", msg: "Grid numbers are required" },
+    { id: "gcp_points", errId: "err_gcp_points", msg: "GCP points are required" },
     { id: "base_height_m", errId: "err_base_height_m", msg: "Base height must be > 0" },
     { id: "remark", errId: "err_remark", msg: "Remark is required" }
   ];
@@ -141,7 +141,6 @@ MGR.viewReport = async function(reportId) {
     if (!modalContent || !modal) return;
     modalContent.innerHTML = html;
     modal.classList.remove('hidden');
-    MGR.getFlashMessages();
   } catch (err) {
     alert('Error loading report: ' + err.message);
     console.error('Error in viewReport:', err);
@@ -159,7 +158,6 @@ MGR.editReport = async function(reportId) {
     modalContent.innerHTML = html;
     modal.classList.remove('hidden');
     
-    // Attach form submission handler
     const form = document.querySelector("#editModal form");
     if (form) {
       form.addEventListener("submit", async function(e) {
@@ -171,7 +169,6 @@ MGR.editReport = async function(reportId) {
             body: new FormData(form),
           });
           const data = await res.json();
-          await MGR.getFlashMessages();
           if (data.ok) {
             alert(data.message);
             modal.classList.add('hidden');
@@ -185,7 +182,6 @@ MGR.editReport = async function(reportId) {
         }
       });
     }
-    MGR.getFlashMessages();
   } catch (err) {
     alert('Error loading edit form: ' + err.message);
     console.error('Error in editReport:', err);
@@ -195,11 +191,8 @@ MGR.editReport = async function(reportId) {
 MGR.deleteReport = async function(reportId) {
   if (!confirm('Are you sure you want to delete this report?')) return;
   try {
-    const res = await fetch(`/report/${reportId}/delete`, {
-      method: 'POST',
-    });
+    const res = await fetch(`/report/${reportId}/delete`, { method: 'POST' });
     const data = await res.json();
-    await MGR.getFlashMessages();
     if (data.ok) {
       alert(data.message);
       MGR.fetchReports();
@@ -212,67 +205,33 @@ MGR.deleteReport = async function(reportId) {
   }
 };
 
-MGR.getFlashMessages = async function() {
-  try {
-    const res = await fetch('/api/flash-messages');
-    if (!res.ok) {
-      console.error('Failed to fetch flash messages:', res.status);
-      return;
-    }
-    const messages = await res.json();
-    messages.forEach(msg => {
-      alert(`${msg.category.toUpperCase()}: ${msg.message}`);
-    });
-  } catch (err) {
-    console.error('Error fetching flash messages:', err);
-  }
-};
-
 MGR.addFlightRow = function() {
-  if (!confirm('Are you sure you want to add a new flight?')) return;
   const tbody = document.getElementById('flightsTableBody');
   if (!tbody) return;
   const noFlightsRow = document.getElementById('noFlightsRow');
-  if (noFlightsRow) {
-    noFlightsRow.remove();
-  }
+  if (noFlightsRow) noFlightsRow.remove();
+
   const rowCount = tbody.querySelectorAll('.flight-row').length + 1;
   const newRow = document.createElement('tr');
   newRow.className = 'border-b border-gray-200 flight-row';
   newRow.innerHTML = `
     <td class="p-3">${rowCount} <input type="hidden" name="flight_id[]" value=""></td>
-    <td class="p-3">
-      <input type="number" min="1" name="flight_time[]" value=""
-             class="w-full p-2 border border-gray-300 rounded-lg">
-    </td>
-    <td class="p-3">
-      <input type="number" step="0.001" min="0.001" name="flight_area[]" value=""
-             class="w-full p-2 border border-gray-300 rounded-lg">
-    </td>
-    <td class="p-3">
-      <input type="text" name="flight_ubx[]" value=""
-             class="w-full p-2 border border-gray-300 rounded-lg">
-    </td>
-    <td class="p-3">
-      <input type="text" name="flight_base[]" value=""
-             class="w-full p-2 border border-gray-300 rounded-lg">
-    </td>
-    <td class="p-3">
-      <button type="button" onclick="MGR.deleteFlightRow(this)" class="py-1 px-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
-    </td>
+    <td class="p-3"><input type="number" min="1" name="flight_time[]" class="w-full p-2 border rounded-lg"></td>
+    <td class="p-3"><input type="number" step="0.001" min="0.001" name="flight_area[]" class="w-full p-2 border rounded-lg"></td>
+    <td class="p-3"><input type="text" name="flight_ubx[]" class="w-full p-2 border rounded-lg"></td>
+    <td class="p-3"><input type="text" name="flight_base[]" class="w-full p-2 border rounded-lg"></td>
+    <td class="p-3"><button type="button" onclick="MGR.deleteFlightRow(this)" class="py-1 px-2 bg-red-600 text-white rounded-lg">Delete</button></td>
   `;
   tbody.appendChild(newRow);
 };
 
 MGR.deleteFlightRow = function(button) {
-  if (!confirm('Are you sure you want to delete this flight?')) return;
   const row = button.closest('tr');
   row.remove();
   const tbody = document.getElementById('flightsTableBody');
-  if (!tbody) return;
   const rows = tbody.querySelectorAll('.flight-row');
   if (rows.length === 0) {
-    tbody.innerHTML = '<tr id="noFlightsRow"><td colspan="6" class="p-3 text-gray-600 text-center">No flights recorded.</td></tr>';
+    tbody.innerHTML = '<tr id="noFlightsRow"><td colspan="6" class="p-3 text-center text-gray-600">No flights recorded.</td></tr>';
   } else {
     rows.forEach((row, index) => {
       row.querySelector('td:first-child').firstChild.textContent = index + 1;
@@ -292,5 +251,4 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   if (document.getElementById('reportsTableBody')) MGR.fetchReports();
   if (document.getElementById('trackTableBody')) MGR.fetchTrack();
-  MGR.getFlashMessages();
 });

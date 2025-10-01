@@ -1,5 +1,6 @@
 import os
 import uuid
+import json
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
@@ -9,6 +10,7 @@ from flask import (
 )
 import mysql.connector
 from mysql.connector import pooling
+import json
 
 # ----------------- Config -----------------
 load_dotenv()
@@ -35,6 +37,45 @@ def fmt_ist(dt_utc_naive):
         return "-"
     return dt_utc_naive.strftime("%d %b %Y %I:%M %p IST")
 app.jinja_env.globals['fmt_ist'] = fmt_ist
+
+def _fromjson_filter(value):
+    """
+    Robustly turn a value into a list for templates:
+    - If it's already a list/tuple -> list
+    - If it's a JSON string -> parse JSON
+    - If parse fails or it's a plain CSV string -> split by comma
+    - If None/empty -> []
+    This handles MySQL JSON columns (stringified or native) safely.
+    """
+    if value is None:
+        return []
+    # If already list/tuple (some drivers may return native types)
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    # If dict, show keys/values as "k:v" (rare, but safe)
+    if isinstance(value, dict):
+        return [f"{k}:{v}" for k, v in value.items()]
+    # Try JSON-decode if it's a string
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return []
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return parsed
+            if isinstance(parsed, dict):
+                return [f"{k}:{v}" for k, v in parsed.items()]
+            # If it's a scalar JSON, fall back to CSV split logic
+        except Exception:
+            pass
+        # Fallback: treat as CSV string
+        return [x.strip() for x in s.split(",") if x.strip()]
+    # Any other scalar -> string it
+    return [str(value)]
+
+# Make the filter available to Jinja
+app.jinja_env.filters['fromjson'] = _fromjson_filter
 
 # ----------------- DB Pool -----------------
 dbconfig = {
@@ -360,50 +401,48 @@ def report_edit(report_id):
     if request.method == "GET":
         return render_template("report_edit.html", report=rep, flights=flights, sites=sites, drones=drones)
 
+    # --- Parse form fields ---
     report_date = (request.form.get("report_date") or "").strip()
     site_name = (request.form.get("site_name") or "").strip()
     drone_name = (request.form.get("drone_name") or "").strip()
     pilot = (request.form.get("pilot_name") or "").strip()
     copilot = (request.form.get("copilot_name") or "").strip()
     remark = (request.form.get("remark") or "").strip()
-    dgps_used = (request.form.get("dgps_used") or "").strip()
-    dgps_operators = (request.form.get("dgps_operators") or "").strip()
-    grid_numbers = (request.form.get("grid_numbers") or "").strip()
-    gcp_points = (request.form.get("gcp_points") or "").strip()
+
+    def parse_list(val):
+        return [x.strip() for x in val.split(",") if x.strip()]
+
+    dgps_used = json.dumps(parse_list(request.form.get("dgps_used") or ""))
+    dgps_operators = json.dumps(parse_list(request.form.get("dgps_operators") or ""))
+    grid_numbers = json.dumps(parse_list(request.form.get("grid_numbers") or ""))
+    gcp_points = json.dumps(parse_list(request.form.get("gcp_points") or ""))
+
     try:
         base_h = float(request.form.get("base_height_m") or 0)
     except Exception:
         base_h = 0
 
+    # --- Validation ---
     errors = []
-    if not report_date:
-        errors.append("Report date is required.")
-    if not site_name:
-        errors.append("Site name is required.")
-    if not drone_name:
-        errors.append("Drone name is required.")
-    if not pilot:
-        errors.append("Pilot name is required.")
-    if not copilot:
-        errors.append("Copilot name is required.")
-    if not remark:
-        errors.append("Remark is required.")
-    if not dgps_used:
-        errors.append("DGPS used is required.")
-    if not dgps_operators:
-        errors.append("DGPS operators is required.")
-    if not grid_numbers:
-        errors.append("Grid numbers is required.")
-    if not gcp_points:
-        errors.append("GCP points is required.")
-    if base_h <= 0:
-        errors.append("Base height must be > 0.")
+    if not report_date: errors.append("Report date is required.")
+    if not site_name: errors.append("Site name is required.")
+    if not drone_name: errors.append("Drone name is required.")
+    if not pilot: errors.append("Pilot name is required.")
+    if not copilot: errors.append("Copilot name is required.")
+    if not remark: errors.append("Remark is required.")
+    if base_h <= 0: errors.append("Base height must be > 0.")
+    if not json.loads(dgps_used): errors.append("DGPS used is required.")
+    if not json.loads(dgps_operators): errors.append("DGPS operators are required.")
+    if not json.loads(grid_numbers): errors.append("Grid numbers are required.")
+    if not json.loads(gcp_points): errors.append("GCP points are required.")
 
+    # Flights
     flight_ids = request.form.getlist("flight_id[]")
     flight_times = request.form.getlist("flight_time[]")
     flight_areas = request.form.getlist("flight_area[]")
     flight_ubxs = request.form.getlist("flight_ubx[]")
     flight_bases = request.form.getlist("flight_base[]")
+
     flights_data = []
     for i in range(len(flight_times)):
         try:
@@ -412,14 +451,10 @@ def report_edit(report_id):
             area = float(flight_areas[i]) if flight_areas[i].strip() else 0
             ubx = (flight_ubxs[i] or "").strip()
             base = (flight_bases[i] or "").strip()
-            if time < 1:
-                errors.append(f"Flight {i+1}: Time must be ≥ 1.")
-            if area <= 0:
-                errors.append(f"Flight {i+1}: Area must be > 0.")
-            if not ubx:
-                errors.append(f"Flight {i+1}: UBX is required.")
-            if not base:
-                errors.append(f"Flight {i+1}: Base file is required.")
+            if time < 1: errors.append(f"Flight {i+1}: Time must be ≥ 1.")
+            if area <= 0: errors.append(f"Flight {i+1}: Area must be > 0.")
+            if not ubx: errors.append(f"Flight {i+1}: UBX is required.")
+            if not base: errors.append(f"Flight {i+1}: Base file is required.")
             flights_data.append({
                 "id": flight_id,
                 "flight_time_min": time,
@@ -431,17 +466,16 @@ def report_edit(report_id):
             errors.append(f"Flight {i+1}: Invalid time or area.")
 
     if errors:
-        for err in errors:
-            flash(err, "danger")
-        return jsonify({"ok": False, "message": "Validation errors occurred."})
+        return jsonify({"ok": False, "message": "; ".join(errors)})
 
+    # --- Save ---
     try:
         with db_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE reports SET report_date = %s, site_name = %s, drone_name = %s, pilot_name = %s, copilot_name = %s, "
-                "base_height_m = %s, dgps_used_json = %s, dgps_operators_json = %s, grid_numbers_json = %s, "
-                "gcp_points_json = %s, remark = %s, total_time_min = %s, total_area_sq_km = %s "
-                "WHERE id = %s",
+                "UPDATE reports SET report_date=%s, site_name=%s, drone_name=%s, pilot_name=%s, copilot_name=%s, "
+                "base_height_m=%s, dgps_used_json=%s, dgps_operators_json=%s, grid_numbers_json=%s, "
+                "gcp_points_json=%s, remark=%s, total_time_min=%s, total_area_sq_km=%s "
+                "WHERE id=%s",
                 (
                     report_date, site_name, drone_name, pilot, copilot, base_h,
                     dgps_used, dgps_operators, grid_numbers, gcp_points, remark,
@@ -450,7 +484,7 @@ def report_edit(report_id):
                     report_id
                 )
             )
-            cur.execute("DELETE FROM report_flights WHERE report_id = %s", (report_id,))
+            cur.execute("DELETE FROM report_flights WHERE report_id=%s", (report_id,))
             for f in flights_data:
                 cur.execute(
                     "INSERT INTO report_flights (report_id, flight_time_min, area_sq_km, uav_rover_file, drone_base_file_no) "
@@ -459,10 +493,8 @@ def report_edit(report_id):
                 )
     except Exception as e:
         logger.error(f"Failed to update report {report_id}: {e}")
-        flash("Failed to update report due to a server error.", "danger")
-        return jsonify({"ok": False, "message": "Failed to update report."})
+        return jsonify({"ok": False, "message": "Failed to update report due to a server error."})
 
-    flash("Report updated successfully.", "success")
     return jsonify({"ok": True, "message": "Report updated successfully."})
 
 @app.route("/report/<int:report_id>/delete", methods=["POST"])
@@ -473,9 +505,7 @@ def report_delete(report_id):
             cur.execute("DELETE FROM reports WHERE id = %s", (report_id,))
     except Exception as e:
         logger.error(f"Failed to delete report {report_id}: {e}")
-        flash("Failed to delete report due to a server error.", "danger")
-        return jsonify({"ok": False, "message": "Failed to delete report."})
-    flash("Report deleted successfully.", "success")
+        return jsonify({"ok": False, "message": "Failed to delete report due to a server error."})
     return jsonify({"ok": True, "message": "Report deleted successfully."})
 
 if __name__ == "__main__":

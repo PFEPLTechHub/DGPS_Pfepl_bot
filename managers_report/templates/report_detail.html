@@ -8,6 +8,7 @@
 </head>
 <body>
   <div class="grid gap-6">
+    <!-- Report Summary -->
     <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 max-w-lg">
       <h3 class="text-lg font-semibold text-gray-800 mb-4">Report Summary</h3>
       <ul class="space-y-2">
@@ -18,18 +19,23 @@
         <li><span class="font-medium">Copilot:</span> {{ report.copilot_name }}</li>
         <li><span class="font-medium">Base Height (m):</span> {{ '%.2f'|format(report.base_height_m) }}</li>
         <li><span class="font-medium">Created:</span> {{ fmt_ist(report.created_at) }}</li>
-        <li><span class="font-medium">DGPS Used:</span> {{ report.dgps_used_json }}</li>
-        <li><span class="font-medium">DGPS Operators:</span> {{ report.dgps_operators_json }}</li>
-        <li><span class="font-medium">Grid Numbers:</span> {{ report.grid_numbers_json }}</li>
-        <li><span class="font-medium">GCP Points:</span> {{ report.gcp_points_json }}</li>
+
+        <!-- JSON fields parsed into clean strings -->
+        <li><span class="font-medium">DGPS Used:</span> {{ report.dgps_used_json|default("[]")|fromjson|join(', ') }}</li>
+        <li><span class="font-medium">DGPS Operators:</span> {{ report.dgps_operators_json|default("[]")|fromjson|join(', ') }}</li>
+        <li><span class="font-medium">Grid Numbers:</span> {{ report.grid_numbers_json|default("[]")|fromjson|join(', ') }}</li>
+        <li><span class="font-medium">GCP Points:</span> {{ report.gcp_points_json|default("[]")|fromjson|join(', ') }}</li>
+
         <li><span class="font-medium">Remark:</span> {{ report.remark or '-' }}</li>
       </ul>
+
       <div class="mt-4 bg-blue-50 p-4 rounded-lg">
         <div><span class="font-medium">Total Area (sq km):</span> {{ '%.3f'|format(report.total_area_sq_km) }}</div>
         <div><span class="font-medium">Total Time (min):</span> {{ report.total_time_min }}</div>
       </div>
     </div>
 
+    <!-- Flights Section -->
     <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 max-w-lg">
       <h3 class="text-lg font-semibold text-gray-800 mb-4">Flights</h3>
       <table class="w-full table-auto">
