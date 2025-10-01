@@ -77,6 +77,19 @@ def _fromjson_filter(value):
 # Make the filter available to Jinja
 app.jinja_env.filters['fromjson'] = _fromjson_filter
 
+def _manager_user_id():
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute("SELECT id FROM users WHERE telegram_id = %s LIMIT 1", (session["manager_tg"],))
+        row = cur.fetchone()
+        return row["id"] if row else None
+
+def _full_name(first_name, last_name, username, tg):
+    fn = (first_name or "").strip()
+    ln = (last_name or "").strip()
+    full = (fn + " " + ln).strip()
+    return full or (username or f"tg:{tg}")
+
+
 # ----------------- DB Pool -----------------
 dbconfig = {
     "host": MYSQL_HOST,
@@ -228,11 +241,36 @@ def flash_messages():
 def dashboard():
     return render_template("dashboard.html", default_date=today_ist_str())
 
-@app.route("/view-report")
+# ----------------- NEW VIEW REPORT PAGE (Tabbed) -----------------
+@app.route("/view-report", methods=["GET"])
 @login_required
 def view_report_page():
-    return render_template("report_detail.html", report=None, flights=[], readonly=True)
+    # employees (under this manager), plus sites and drones for dropdowns
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute(
+            "SELECT u.telegram_id, u.first_name, u.last_name, u.username "
+            "FROM users u "
+            "WHERE u.role = 2 AND u.is_active = 1 AND u.manager_id = "
+            "(SELECT id FROM users WHERE telegram_id = %s LIMIT 1) "
+            "ORDER BY u.first_name, u.last_name, u.id",
+            (session["manager_tg"],)
+        )
+        emps = cur.fetchall()
+        employees = [{
+            "telegram_id": e["telegram_id"],
+            "name": _full_name(e["first_name"], e["last_name"], e["username"], e["telegram_id"])
+        } for e in emps]
 
+        cur.execute("SELECT name FROM master_sites WHERE is_active = 1 ORDER BY name")
+        sites = cur.fetchall()
+
+        cur.execute("SELECT name FROM master_drones WHERE is_active = 1 ORDER BY name")
+        drones = cur.fetchall()
+
+    # This renders your new tabbed UI template (you added this file separately)
+    return render_template("view_report.html", employees=employees, sites=sites, drones=drones)
+
+# ----------------- EXISTING EDIT PAGE ENTRY -----------------
 @app.route("/edit-report", methods=["GET", "POST"])
 @login_required
 def edit_report_page():
@@ -507,6 +545,260 @@ def report_delete(report_id):
         logger.error(f"Failed to delete report {report_id}: {e}")
         return jsonify({"ok": False, "message": "Failed to delete report due to a server error."})
     return jsonify({"ok": True, "message": "Report deleted successfully."})
+
+# ----------------- NEW APIs for View Reports Tabs -----------------
+
+@app.route("/api/view/date", methods=["GET"])
+@login_required
+def api_view_date():
+    mode = (request.args.get("mode") or "single").lower()
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    mgr_id = _manager_user_id()
+    if not mgr_id:
+        return jsonify({"ok": True, "rows": [], "message": "Manager not found"})
+
+    rows = []
+    msg = None
+
+    try:
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            if mode == "range":
+                dfrom = request.args.get("from")
+                dto = request.args.get("to")
+                if not dfrom or not dto:
+                    return jsonify({"ok": False, "rows": [], "message": "Please select From and To dates"})
+                if dto > today:
+                    msg = "Future 'To' date selected. No data."
+                    return jsonify({"ok": True, "rows": [], "message": msg})
+
+                cur.execute(
+                    "SELECT r.id, r.created_at, u.first_name, u.last_name "
+                    "FROM reports r "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.report_date BETWEEN %s AND %s "
+                    "ORDER BY r.created_at ASC, r.id ASC",
+                    (mgr_id, dfrom, dto)
+                )
+            else:
+                d = request.args.get("date") or today
+                if d > today:
+                    msg = "Future date selected. No data."
+                    return jsonify({"ok": True, "rows": [], "message": msg})
+
+                cur.execute(
+                    "SELECT r.id, r.created_at, u.first_name, u.last_name "
+                    "FROM reports r "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.report_date = %s "
+                    "ORDER BY r.created_at ASC, r.id ASC",
+                    (mgr_id, d)
+                )
+
+            data = cur.fetchall() or []
+            for i, r in enumerate(data, start=1):
+                rows.append({
+                    "sr": i,
+                    "first_name": r["first_name"] or "",
+                    "last_name": r["last_name"] or "",
+                    "id": r["id"],
+                })
+    except Exception as e:
+        logger.warning(f"/api/view/date error: {e}")
+        return jsonify({"ok": False, "rows": [], "message": "Server error"})
+
+    return jsonify({"ok": True, "rows": rows, "message": msg})
+
+@app.route("/api/view/employee", methods=["GET"])
+@login_required
+def api_view_employee():
+    tg = request.args.get("employee") or ""
+    if not tg:
+        return jsonify({"ok": True, "rows": [], "message": "Select an employee"})
+
+    mgr_id = _manager_user_id()
+    if not mgr_id:
+        return jsonify({"ok": True, "rows": [], "message": "Manager not found"})
+
+    rows = []
+    try:
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            # ensure this employee belongs to this manager
+            cur.execute(
+                "SELECT 1 FROM users WHERE telegram_id = %s AND manager_id = %s LIMIT 1",
+                (tg, mgr_id)
+            )
+            if not cur.fetchone():
+                return jsonify({"ok": True, "rows": [], "message": "Employee not under this manager"})
+
+            cur.execute(
+                "SELECT id, report_date, site_name, created_at "
+                "FROM reports WHERE employee_telegram_id = %s "
+                "ORDER BY report_date DESC, created_at DESC, id DESC",
+                (tg,)
+            )
+            data = cur.fetchall() or []
+            for i, r in enumerate(data, start=1):
+                rows.append({
+                    "sr": i,
+                    "date": r["report_date"].strftime("%Y-%m-%d") if hasattr(r["report_date"], "strftime") else str(r["report_date"]),
+                    "site_name": r["site_name"],
+                    "created_at": fmt_ist(r["created_at"]),
+                    "id": r["id"]
+                })
+    except Exception as e:
+        logger.warning(f"/api/view/employee error: {e}")
+        return jsonify({"ok": False, "rows": [], "message": "Server error"})
+
+    return jsonify({"ok": True, "rows": rows})
+
+@app.route("/api/view/sites", methods=["GET"])
+@login_required
+def api_view_sites():
+    site = (request.args.get("site") or "").strip()
+    date_opt = (request.args.get("date") or "").strip()
+    if not site:
+        return jsonify({"ok": True, "rows": [], "total_area": "0.000", "message": "Select a site"})
+
+    mgr_id = _manager_user_id()
+    if not mgr_id:
+        return jsonify({"ok": True, "rows": [], "total_area": "0.000", "message": "Manager not found"})
+
+    rows = []
+    total_area = 0.0
+
+    try:
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            # list rows
+            if date_opt:
+                cur.execute(
+                    "SELECT r.id, r.report_date, u.first_name, u.last_name "
+                    "FROM reports r "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.site_name = %s AND r.report_date = %s "
+                    "ORDER BY r.report_date DESC, r.id DESC",
+                    (mgr_id, site, date_opt)
+                )
+            else:
+                cur.execute(
+                    "SELECT r.id, r.report_date, u.first_name, u.last_name "
+                    "FROM reports r "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.site_name = %s "
+                    "ORDER BY r.report_date DESC, r.id DESC",
+                    (mgr_id, site)
+                )
+            data = cur.fetchall() or []
+            for i, r in enumerate(data, start=1):
+                rows.append({
+                    "sr": i,
+                    "first_name": r["first_name"] or "",
+                    "last_name": r["last_name"] or "",
+                    "date": r["report_date"].strftime("%Y-%m-%d") if hasattr(r["report_date"], "strftime") else str(r["report_date"]),
+                    "id": r["id"]
+                })
+
+            # total area from report_flights
+            if date_opt:
+                cur.execute(
+                    "SELECT COALESCE(SUM(rf.area_sq_km),0) AS tot "
+                    "FROM report_flights rf "
+                    "JOIN reports r ON r.id = rf.report_id "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.site_name = %s AND r.report_date = %s",
+                    (mgr_id, site, date_opt)
+                )
+            else:
+                cur.execute(
+                    "SELECT COALESCE(SUM(rf.area_sq_km),0) AS tot "
+                    "FROM report_flights rf "
+                    "JOIN reports r ON r.id = rf.report_id "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.site_name = %s",
+                    (mgr_id, site)
+                )
+            tr = cur.fetchone()
+            if tr and tr.get("tot") is not None:
+                total_area = float(tr["tot"])
+    except Exception as e:
+        logger.warning(f"/api/view/sites error: {e}")
+        return jsonify({"ok": False, "rows": [], "total_area": "0.000", "message": "Server error"})
+
+    return jsonify({"ok": True, "rows": rows, "total_area": f"{total_area:.3f}"})
+
+@app.route("/api/view/drones", methods=["GET"])
+@login_required
+def api_view_drones():
+    drone = (request.args.get("drone") or "").strip()
+    date_opt = (request.args.get("date") or "").strip()
+    if not drone:
+        return jsonify({"ok": True, "rows": [], "total_flights": 0, "message": "Select a drone"})
+
+    mgr_id = _manager_user_id()
+    if not mgr_id:
+        return jsonify({"ok": True, "rows": [], "total_flights": 0, "message": "Manager not found"})
+
+    rows = []
+    total_flights = 0
+
+    try:
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            # list rows
+            if date_opt:
+                cur.execute(
+                    "SELECT r.id, r.report_date, u.first_name, u.last_name "
+                    "FROM reports r "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.drone_name = %s AND r.report_date = %s "
+                    "ORDER BY r.report_date DESC, r.id DESC",
+                    (mgr_id, drone, date_opt)
+                )
+            else:
+                cur.execute(
+                    "SELECT r.id, r.report_date, u.first_name, u.last_name "
+                    "FROM reports r "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.drone_name = %s "
+                    "ORDER BY r.report_date DESC, r.id DESC",
+                    (mgr_id, drone)
+                )
+            data = cur.fetchall() or []
+            for i, r in enumerate(data, start=1):
+                rows.append({
+                    "sr": i,
+                    "first_name": r["first_name"] or "",
+                    "last_name": r["last_name"] or "",
+                    "date": r["report_date"].strftime("%Y-%m-%d") if hasattr(r["report_date"], "strftime") else str(r["report_date"]),
+                    "id": r["id"]
+                })
+
+            # total flights from report_flights
+            if date_opt:
+                cur.execute(
+                    "SELECT COUNT(*) AS c "
+                    "FROM report_flights rf "
+                    "JOIN reports r ON r.id = rf.report_id "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.drone_name = %s AND r.report_date = %s",
+                    (mgr_id, drone, date_opt)
+                )
+            else:
+                cur.execute(
+                    "SELECT COUNT(*) AS c "
+                    "FROM report_flights rf "
+                    "JOIN reports r ON r.id = rf.report_id "
+                    "JOIN users u ON u.telegram_id = r.employee_telegram_id "
+                    "WHERE u.manager_id = %s AND r.drone_name = %s",
+                    (mgr_id, drone)
+                )
+            tr = cur.fetchone()
+            if tr and tr.get("c") is not None:
+                total_flights = int(tr["c"])
+    except Exception as e:
+        logger.warning(f"/api/view/drones error: {e}")
+        return jsonify({"ok": False, "rows": [], "total_flights": 0, "message": "Server error"})
+
+    return jsonify({"ok": True, "rows": rows, "total_flights": total_flights})
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=9000, debug=True)

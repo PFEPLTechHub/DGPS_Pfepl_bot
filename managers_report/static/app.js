@@ -252,3 +252,269 @@ document.addEventListener('DOMContentLoaded', () => {
   if (document.getElementById('reportsTableBody')) MGR.fetchReports();
   if (document.getElementById('trackTableBody')) MGR.fetchTrack();
 });
+// ===== View Reports (Tabbed) =====
+MGR.initViewReports = function() {
+  const tabs = document.querySelectorAll('.vr-tab');
+  const panels = document.querySelectorAll('.vr-tabpanel');
+  const refresh = document.getElementById('vrRefresh');
+
+  function activate(tabName) {
+    tabs.forEach(t => {
+      if (t.dataset.tab === tabName) {
+        t.classList.add('bg-blue-50', 'text-blue-700');
+      } else {
+        t.classList.remove('bg-blue-50', 'text-blue-700');
+      }
+    });
+    panels.forEach(p => {
+      p.classList.toggle('hidden', p.id !== 'vrTab_' + tabName);
+    });
+    localStorage.setItem('vr_active_tab', tabName);
+  }
+
+  tabs.forEach(t => {
+    t.addEventListener('click', () => {
+      activate(t.dataset.tab);
+    });
+  });
+
+  // default tab = date
+  activate(localStorage.getItem('vr_active_tab') || 'date');
+
+  // wiring filters
+  const modeSel = document.getElementById('vrDateMode');
+  const singleWrap = document.getElementById('vrDateSingleWrap');
+  const rangeWrap = document.getElementById('vrDateRangeWrap');
+  const dateSingle = document.getElementById('vrDateSingle');
+  const dateFrom = document.getElementById('vrDateFrom');
+  const dateTo = document.getElementById('vrDateTo');
+
+  if (modeSel) {
+    modeSel.addEventListener('change', () => {
+      if (modeSel.value === 'range') {
+        singleWrap.classList.add('hidden');
+        rangeWrap.classList.remove('hidden');
+      } else {
+        singleWrap.classList.remove('hidden');
+        rangeWrap.classList.add('hidden');
+      }
+    });
+  }
+
+  // fetchers
+  async function fetchDateTab() {
+    const today = new Date().toISOString().slice(0,10);
+    const tbody = document.getElementById('vrDateTbody');
+    const msg = document.getElementById('vrDateMsg');
+    if (!tbody) return;
+
+    tbody.innerHTML = '';
+    msg.textContent = '';
+
+    let url = '/api/view/date?mode=' + encodeURIComponent(modeSel.value || 'single');
+    if (modeSel.value === 'range') {
+      if (!dateFrom.value || !dateTo.value) {
+        msg.textContent = 'Please select From and To.';
+        return;
+      }
+      if (dateTo.value > today) {
+        alert('Future To date selected. No data.');
+        return;
+      }
+      url += `&from=${encodeURIComponent(dateFrom.value)}&to=${encodeURIComponent(dateTo.value)}`;
+    } else {
+      if (!dateSingle.value) {
+        msg.textContent = 'Please select a date.';
+        return;
+      }
+      if (dateSingle.value > today) {
+        alert('Future date selected. No data.');
+        return;
+      }
+      url += `&date=${encodeURIComponent(dateSingle.value)}`;
+    }
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      (data.rows || []).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-gray-200';
+        tr.innerHTML = `
+          <td class="p-3">${r.sr}</td>
+          <td class="p-3">${r.first_name || ''}</td>
+          <td class="p-3">${r.last_name || ''}</td>
+          <td class="p-3">
+            <a class="text-blue-600 hover:underline cursor-pointer" onclick="MGR.viewReport(${r.id})">View</a>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      if (data.message) msg.textContent = data.message;
+      if ((data.rows || []).length === 0 && !data.message) {
+        msg.textContent = 'No reports found.';
+      }
+    } catch (e) {
+      alert('Failed to load data (Date tab).');
+      console.error(e);
+    }
+  }
+
+  async function fetchEmployeeTab() {
+    const sel = document.getElementById('vrEmpSelect');
+    const tbody = document.getElementById('vrEmpTbody');
+    const msg = document.getElementById('vrEmpMsg');
+    if (!sel || !tbody) return;
+
+    tbody.innerHTML = '';
+    msg.textContent = '';
+
+    if (!sel.value) {
+      msg.textContent = 'Select an employee.';
+      return;
+    }
+
+    try {
+      const res = await fetch(`/api/view/employee?employee=${encodeURIComponent(sel.value)}`);
+      const data = await res.json();
+      (data.rows || []).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-gray-200';
+        tr.innerHTML = `
+          <td class="p-3">${r.sr}</td>
+          <td class="p-3">${r.date}</td>
+          <td class="p-3">${r.site_name}</td>
+          <td class="p-3">${r.created_at}</td>
+          <td class="p-3">
+            <a class="text-blue-600 hover:underline cursor-pointer" onclick="MGR.viewReport(${r.id})">View</a>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      if ((data.rows || []).length === 0) {
+        msg.textContent = 'No reports found for this employee.';
+      }
+    } catch (e) {
+      alert('Failed to load data (Employee tab).');
+      console.error(e);
+    }
+  }
+
+  async function fetchSitesTab() {
+    const sel = document.getElementById('vrSiteSelect');
+    const date = document.getElementById('vrSiteDate');
+    const tbody = document.getElementById('vrSiteTbody');
+    const total = document.getElementById('vrSiteTotal');
+    if (!sel || !tbody) return;
+
+    tbody.innerHTML = '';
+    total.textContent = '0.000';
+
+    if (!sel.value) {
+      return;
+    }
+
+    let url = `/api/view/sites?site=${encodeURIComponent(sel.value)}`;
+    if (date && date.value) url += `&date=${encodeURIComponent(date.value)}`;
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      (data.rows || []).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-gray-200';
+        tr.innerHTML = `
+          <td class="p-3">${r.sr}</td>
+          <td class="p-3">${r.first_name || ''}</td>
+          <td class="p-3">${r.last_name || ''}</td>
+          <td class="p-3">${r.date}</td>
+          <td class="p-3">
+            <a class="text-blue-600 hover:underline cursor-pointer" onclick="MGR.viewReport(${r.id})">View</a>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      if (data.total_area != null) total.textContent = data.total_area;
+    } catch (e) {
+      alert('Failed to load data (Sites tab).');
+      console.error(e);
+    }
+  }
+
+  async function fetchDronesTab() {
+    const sel = document.getElementById('vrDroneSelect');
+    const date = document.getElementById('vrDroneDate');
+    const tbody = document.getElementById('vrDroneTbody');
+    const total = document.getElementById('vrDroneTotal');
+    if (!sel || !tbody) return;
+
+    tbody.innerHTML = '';
+    total.textContent = '0';
+
+    if (!sel.value) {
+      return;
+    }
+
+    let url = `/api/view/drones?drone=${encodeURIComponent(sel.value)}`;
+    if (date && date.value) url += `&date=${encodeURIComponent(date.value)}`;
+
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      (data.rows || []).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.className = 'border-b border-gray-200';
+        tr.innerHTML = `
+          <td class="p-3">${r.sr}</td>
+          <td class="p-3">${r.first_name || ''}</td>
+          <td class="p-3">${r.last_name || ''}</td>
+          <td class="p-3">${r.date}</td>
+          <td class="p-3">
+            <a class="text-blue-600 hover:underline cursor-pointer" onclick="MGR.viewReport(${r.id})">View</a>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+      if (data.total_flights != null) total.textContent = data.total_flights;
+    } catch (e) {
+      alert('Failed to load data (Drones tab).');
+      console.error(e);
+    }
+  }
+
+  // wire controls to fetch
+  // Date tab changes
+  if (modeSel) modeSel.addEventListener('change', fetchDateTab);
+  if (dateSingle) dateSingle.addEventListener('change', fetchDateTab);
+  if (dateFrom) dateFrom.addEventListener('change', fetchDateTab);
+  if (dateTo) dateTo.addEventListener('change', fetchDateTab);
+
+  const empSel = document.getElementById('vrEmpSelect');
+  if (empSel) empSel.addEventListener('change', fetchEmployeeTab);
+
+  const siteSel = document.getElementById('vrSiteSelect');
+  const siteDate = document.getElementById('vrSiteDate');
+  if (siteSel) siteSel.addEventListener('change', fetchSitesTab);
+  if (siteDate) siteDate.addEventListener('change', fetchSitesTab);
+
+  const droneSel = document.getElementById('vrDroneSelect');
+  const droneDate = document.getElementById('vrDroneDate');
+  if (droneSel) droneSel.addEventListener('change', fetchDronesTab);
+  if (droneDate) droneDate.addEventListener('change', fetchDronesTab);
+
+  // Refresh based on current tab, without resetting filters
+  if (refresh) {
+    refresh.addEventListener('click', () => {
+      const active = localStorage.getItem('vr_active_tab') || 'date';
+      if (active === 'date') return fetchDateTab();
+      if (active === 'employee') return fetchEmployeeTab();
+      if (active === 'sites') return fetchSitesTab();
+      if (active === 'drones') return fetchDronesTab();
+    });
+  }
+
+  // load default (date tab)
+  fetchDateTab();
+};
+
+// keep existing MGR.viewReport, etc.
