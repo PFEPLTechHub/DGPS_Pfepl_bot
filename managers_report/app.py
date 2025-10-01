@@ -5,7 +5,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, jsonify, flash, get_flashed_messages
+    session, jsonify, flash
 )
 import mysql.connector
 from mysql.connector import pooling
@@ -178,13 +178,6 @@ def logout():
             logger.warning(f"Failed to clear session_token: {e}")
     session.clear()
     return redirect(url_for("login"))
-
-# ----------------- Flash Messages API -----------------
-@app.route("/api/flash-messages", methods=["GET"])
-@login_required
-def get_flash_messages():
-    messages = get_flashed_messages(with_categories=True)
-    return jsonify({"messages": messages})
 
 # ----------------- Sidebar Pages -----------------
 @app.route("/dashboard")
@@ -434,7 +427,7 @@ def report_edit(report_id):
     if errors:
         for err in errors:
             flash(err, "danger")
-        return render_template("report_edit.html", report=rep, flights=flights)
+        return jsonify({"ok": False, "message": "Validation errors. See flash messages."})
 
     # Update report
     try:
