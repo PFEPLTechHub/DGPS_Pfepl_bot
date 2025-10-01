@@ -246,10 +246,23 @@
 
   </div>
 </div>
+
+<!-- VIEW MODAL (needed for MGR.viewReport) -->
+<div id="viewModal" class="fixed inset-0 z-50 hidden">
+  <div class="absolute inset-0 bg-black/50" onclick="document.getElementById('viewModal').classList.add('hidden')"></div>
+  <div class="relative mx-auto my-8 max-w-3xl w-[92%] bg-white rounded-xl shadow-xl overflow-hidden">
+    <div class="flex items-center justify-between px-4 py-3 border-b">
+      <h3 class="text-lg font-semibold text-gray-800">Report Preview</h3>
+      <button class="text-gray-500 hover:text-gray-700" onclick="document.getElementById('viewModal').classList.add('hidden')">✕</button>
+    </div>
+    <div id="viewModalContent" class="max-h-[80vh] overflow-y-auto p-4">
+      <!-- report html injected here -->
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
-<script>
-// Tab logic is in static/app.js (the script you already have).
-</script>
+{# make sure app.js is loaded, either here or in base.html #}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
 {% endblock %}
