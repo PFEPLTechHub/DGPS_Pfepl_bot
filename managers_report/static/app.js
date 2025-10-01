@@ -1,5 +1,69 @@
 window.MGR = window.MGR || {};
 
+window.validateForm = function(formId = 'editForm') {
+  let hasError = false;
+  const form = document.getElementById(formId);
+  if (!form) return false;
+
+  const fields = [
+    { id: "report_date", errId: "err_report_date", msg: "Date is required" },
+    { id: "site_name", errId: "err_site_name", msg: "Site is required" },
+    { id: "drone_name", errId: "err_drone_name", msg: "Drone is required" },
+    { id: "pilot_name", errId: "err_pilot_name", msg: "Pilot name is required" },
+    { id: "copilot_name", errId: "err_copilot_name", msg: "Copilot name is required" },
+    { id: "dgps_used", errId: "err_dgps_used", msg: "DGPS used is required" },
+    { id: "dgps_operators", errId: "err_dgps_operators", msg: "DGPS operators is required" },
+    { id: "grid_numbers", errId: "err_grid_numbers", msg: "Grid numbers is required" },
+    { id: "gcp_points", errId: "err_gcp_points", msg: "GCP points is required" },
+    { id: "base_height_m", errId: "err_base_height_m", msg: "Base height must be > 0" },
+    { id: "remark", errId: "err_remark", msg: "Remark is required" }
+  ];
+
+  fields.forEach(field => {
+    const input = document.getElementById(field.id);
+    const error = document.getElementById(field.errId);
+    if (!input || !error) return;
+    const value = input.value.trim();
+    if (!value || (field.id === "base_height_m" && parseFloat(value) <= 0)) {
+      error.textContent = field.msg;
+      error.classList.remove("hidden");
+      hasError = true;
+    } else {
+      error.classList.add("hidden");
+    }
+  });
+
+  const flightTimes = form.querySelectorAll('input[name="flight_time[]"]');
+  const flightAreas = form.querySelectorAll('input[name="flight_area[]"]');
+  const flightUbxs = form.querySelectorAll('input[name="flight_ubx[]"]');
+  const flightBases = form.querySelectorAll('input[name="flight_base[]"]');
+
+  for (let i = 0; i < flightTimes.length; i++) {
+    const time = parseFloat(flightTimes[i].value);
+    const area = parseFloat(flightAreas[i].value);
+    const ubx = flightUbxs[i].value.trim();
+    const base = flightBases[i].value.trim();
+    if (isNaN(time) || time < 1) {
+      alert(`Flight ${i+1}: Time must be ≥ 1`);
+      hasError = true;
+    }
+    if (isNaN(area) || area <= 0) {
+      alert(`Flight ${i+1}: Area must be > 0`);
+      hasError = true;
+    }
+    if (!ubx) {
+      alert(`Flight ${i+1}: UBX is required`);
+      hasError = true;
+    }
+    if (!base) {
+      alert(`Flight ${i+1}: Base file is required`);
+      hasError = true;
+    }
+  }
+
+  return !hasError;
+};
+
 MGR.fetchTrack = async function() {
   const datePicker = document.getElementById('datePicker');
   const date = datePicker.value;
@@ -8,6 +72,7 @@ MGR.fetchTrack = async function() {
     if (!res.ok) throw new Error('Failed to load data');
     const data = await res.json();
     const tbody = document.getElementById('trackTableBody');
+    if (!tbody) return;
     tbody.innerHTML = '';
     (data.rows || []).forEach(row => {
       const tr = document.createElement('tr');
@@ -26,12 +91,14 @@ MGR.fetchTrack = async function() {
     });
   } catch (err) {
     alert('Error loading data: ' + err.message);
+    console.error('Error in fetchTrack:', err);
   }
 };
 
 MGR.fetchReports = async function() {
   const datePicker = document.getElementById('datePicker');
   const employeeSelect = document.getElementById('employeeSelect');
+  if (!datePicker || !employeeSelect) return;
   const date = datePicker.value;
   const employee = employeeSelect.value;
   try {
@@ -39,6 +106,7 @@ MGR.fetchReports = async function() {
     if (!res.ok) throw new Error('Failed to load reports');
     const data = await res.json();
     const tbody = document.getElementById('reportsTableBody');
+    if (!tbody) return;
     tbody.innerHTML = '';
     (data.reports || []).forEach(report => {
       const tr = document.createElement('tr');
@@ -59,6 +127,7 @@ MGR.fetchReports = async function() {
     });
   } catch (err) {
     alert('Error loading reports: ' + err.message);
+    console.error('Error in fetchReports:', err);
   }
 };
 
@@ -67,10 +136,15 @@ MGR.viewReport = async function(reportId) {
     const res = await fetch(`/report/${reportId}/preview`);
     if (!res.ok) throw new Error('Failed to load report');
     const html = await res.text();
-    document.getElementById('viewModalContent').innerHTML = html;
-    document.getElementById('viewModal').classList.remove('hidden');
+    const modalContent = document.getElementById('viewModalContent');
+    const modal = document.getElementById('viewModal');
+    if (!modalContent || !modal) return;
+    modalContent.innerHTML = html;
+    modal.classList.remove('hidden');
+    MGR.getFlashMessages();
   } catch (err) {
     alert('Error loading report: ' + err.message);
+    console.error('Error in viewReport:', err);
   }
 };
 
@@ -79,39 +153,42 @@ MGR.editReport = async function(reportId) {
     const res = await fetch(`/report/${reportId}/edit`);
     if (!res.ok) throw new Error('Failed to load edit form');
     const html = await res.text();
-    document.getElementById('editModalContent').innerHTML = html;
-    document.getElementById('editModal').classList.remove('hidden');
-    // Re-attach form submission handler
-    document.querySelector("#editModal form")?.addEventListener("submit", async function(e) {
-      e.preventDefault();
-      if (!window.validateForm()) return;
-      const form = e.target;
-      try {
-        const res = await fetch(form.action, {
-          method: 'POST',
-          body: new FormData(form),
-        });
-        const data = await res.json();
-        // Check for flash messages in session
-        const flashRes = await fetch('/api/flash-messages');
-        const flashData = await flashRes.json();
-        if (flashData.messages && flashData.messages.length > 0) {
-          flashData.messages.forEach(msg => {
-            alert(`${msg[1]} (${msg[0]})`);
+    const modalContent = document.getElementById('editModalContent');
+    const modal = document.getElementById('editModal');
+    if (!modalContent || !modal) return;
+    modalContent.innerHTML = html;
+    modal.classList.remove('hidden');
+    
+    // Attach form submission handler
+    const form = document.querySelector("#editModal form");
+    if (form) {
+      form.addEventListener("submit", async function(e) {
+        e.preventDefault();
+        if (!window.validateForm('editForm')) return;
+        try {
+          const res = await fetch(form.action, {
+            method: 'POST',
+            body: new FormData(form),
           });
-        } else if (data.ok) {
-          alert(data.message);
-          document.getElementById('editModal').classList.add('hidden');
-          MGR.fetchReports();
-        } else {
-          alert('Error: ' + (data.message || 'Failed to update report'));
+          const data = await res.json();
+          await MGR.getFlashMessages();
+          if (data.ok) {
+            alert(data.message);
+            modal.classList.add('hidden');
+            MGR.fetchReports();
+          } else {
+            alert('Error: ' + (data.message || 'Failed to update report'));
+          }
+        } catch (err) {
+          alert('Error updating report: ' + err.message);
+          console.error('Error in form submission:', err);
         }
-      } catch (err) {
-        alert('Error updating report: ' + err.message);
-      }
-    });
+      });
+    }
+    MGR.getFlashMessages();
   } catch (err) {
     alert('Error loading edit form: ' + err.message);
+    console.error('Error in editReport:', err);
   }
 };
 
@@ -122,14 +199,8 @@ MGR.deleteReport = async function(reportId) {
       method: 'POST',
     });
     const data = await res.json();
-    // Check for flash messages
-    const flashRes = await fetch('/api/flash-messages');
-    const flashData = await flashRes.json();
-    if (flashData.messages && flashData.messages.length > 0) {
-      flashData.messages.forEach(msg => {
-        alert(`${msg[1]} (${msg[0]})`);
-      });
-    } else if (data.ok) {
+    await MGR.getFlashMessages();
+    if (data.ok) {
       alert(data.message);
       MGR.fetchReports();
     } else {
@@ -137,21 +208,75 @@ MGR.deleteReport = async function(reportId) {
     }
   } catch (err) {
     alert('Error deleting report: ' + err.message);
+    console.error('Error in deleteReport:', err);
   }
 };
 
-// Fetch flash messages
 MGR.getFlashMessages = async function() {
   try {
     const res = await fetch('/api/flash-messages');
-    const data = await res.json();
-    if (data.messages && data.messages.length > 0) {
-      data.messages.forEach(msg => {
-        alert(`${msg[1]} (${msg[0]})`);
-      });
+    if (!res.ok) {
+      console.error('Failed to fetch flash messages:', res.status);
+      return;
     }
+    const messages = await res.json();
+    messages.forEach(msg => {
+      alert(`${msg.category.toUpperCase()}: ${msg.message}`);
+    });
   } catch (err) {
     console.error('Error fetching flash messages:', err);
+  }
+};
+
+MGR.addFlightRow = function() {
+  if (!confirm('Are you sure you want to add a new flight?')) return;
+  const tbody = document.getElementById('flightsTableBody');
+  if (!tbody) return;
+  const noFlightsRow = document.getElementById('noFlightsRow');
+  if (noFlightsRow) {
+    noFlightsRow.remove();
+  }
+  const rowCount = tbody.querySelectorAll('.flight-row').length + 1;
+  const newRow = document.createElement('tr');
+  newRow.className = 'border-b border-gray-200 flight-row';
+  newRow.innerHTML = `
+    <td class="p-3">${rowCount} <input type="hidden" name="flight_id[]" value=""></td>
+    <td class="p-3">
+      <input type="number" min="1" name="flight_time[]" value=""
+             class="w-full p-2 border border-gray-300 rounded-lg">
+    </td>
+    <td class="p-3">
+      <input type="number" step="0.001" min="0.001" name="flight_area[]" value=""
+             class="w-full p-2 border border-gray-300 rounded-lg">
+    </td>
+    <td class="p-3">
+      <input type="text" name="flight_ubx[]" value=""
+             class="w-full p-2 border border-gray-300 rounded-lg">
+    </td>
+    <td class="p-3">
+      <input type="text" name="flight_base[]" value=""
+             class="w-full p-2 border border-gray-300 rounded-lg">
+    </td>
+    <td class="p-3">
+      <button type="button" onclick="MGR.deleteFlightRow(this)" class="py-1 px-2 bg-red-600 text-white rounded-lg hover:bg-red-700">Delete</button>
+    </td>
+  `;
+  tbody.appendChild(newRow);
+};
+
+MGR.deleteFlightRow = function(button) {
+  if (!confirm('Are you sure you want to delete this flight?')) return;
+  const row = button.closest('tr');
+  row.remove();
+  const tbody = document.getElementById('flightsTableBody');
+  if (!tbody) return;
+  const rows = tbody.querySelectorAll('.flight-row');
+  if (rows.length === 0) {
+    tbody.innerHTML = '<tr id="noFlightsRow"><td colspan="6" class="p-3 text-gray-600 text-center">No flights recorded.</td></tr>';
+  } else {
+    rows.forEach((row, index) => {
+      row.querySelector('td:first-child').firstChild.textContent = index + 1;
+    });
   }
 };
 
@@ -167,6 +292,5 @@ document.addEventListener('DOMContentLoaded', () => {
   });
   if (document.getElementById('reportsTableBody')) MGR.fetchReports();
   if (document.getElementById('trackTableBody')) MGR.fetchTrack();
-  // Fetch flash messages on page load
   MGR.getFlashMessages();
 });

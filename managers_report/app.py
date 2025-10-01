@@ -5,7 +5,7 @@ from datetime import datetime
 from dotenv import load_dotenv
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, jsonify, flash
+    session, jsonify, flash, get_flashed_messages
 )
 import mysql.connector
 from mysql.connector import pooling
@@ -127,7 +127,6 @@ def login():
         flash("Incorrect password.", "danger")
         return render_template("login.html", login_prefill=login_id)
 
-    # Generate new session token if enabled
     new_token = str(uuid.uuid4()) if SESSION_TOKEN_ENABLED else None
     if SESSION_TOKEN_ENABLED:
         try:
@@ -139,7 +138,6 @@ def login():
         except Exception as e:
             logger.warning(f"Failed to update session_token: {e}")
 
-    # Fetch manager's name from users table
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
             "SELECT first_name, last_name "
@@ -148,7 +146,6 @@ def login():
         )
         user = cur.fetchone()
 
-    # Set manager name (fallback to login if user not found)
     manager_name = (
         f"{user['first_name']} {user['last_name']}".strip() 
         if user and user["first_name"] 
@@ -179,11 +176,15 @@ def logout():
     session.clear()
     return redirect(url_for("login"))
 
-# ----------------- Sidebar Pages -----------------
+@app.route("/api/flash-messages", methods=["GET"])
+@login_required
+def flash_messages():
+    messages = get_flashed_messages(with_categories=True)
+    return jsonify([{"category": category, "message": message} for category, message in messages])
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
-    """Track page with date filter & table (Sr No., Employee Name, Submission Time, Status)."""
     return render_template("dashboard.html", default_date=today_ist_str())
 
 @app.route("/view-report")
@@ -194,7 +195,6 @@ def view_report_page():
 @app.route("/edit-report", methods=["GET", "POST"])
 @login_required
 def edit_report_page():
-    """Show date picker and employee dropdown to filter reports."""
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
             "SELECT u.telegram_id, u.first_name, u.last_name, u.username "
@@ -224,14 +224,12 @@ def edit_report_page():
         selected_employee=selected_employee
     )
 
-# ----------------- API: Track data -----------------
 @app.route("/api/track")
 @login_required
 def api_track():
     date_str = request.args.get("date") or today_ist_str()
     mgr_tg_id = session["manager_tg"]
 
-    # Get employees under this manager
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
             "SELECT u.telegram_id, u.first_name, u.last_name, u.username "
@@ -250,7 +248,6 @@ def api_track():
         lname = (e["last_name"] or "").strip()
         names[e["telegram_id"]] = (fname + " " + lname).strip() or (e["username"] or f"tg:{e['telegram_id']}")
 
-    # Get reports for the selected date
     report_by_tg = {}
     if tg_ids:
         placeholders = ",".join(["%s"] * len(tg_ids))
@@ -276,7 +273,6 @@ def api_track():
 
     return jsonify({"ok": True, "date": date_str, "rows": rows})
 
-# ----------------- API: Reports by date and employee -----------------
 @app.route("/api/reports")
 @login_required
 def api_reports():
@@ -288,7 +284,6 @@ def api_reports():
         return jsonify({"ok": True, "reports": []})
 
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-        # Verify employee is under this manager
         cur.execute(
             "SELECT 1 FROM users u "
             "WHERE u.telegram_id = %s AND u.role = 2 AND u.is_active = 1 AND u.manager_id = "
@@ -298,7 +293,6 @@ def api_reports():
         if not cur.fetchone():
             return jsonify({"ok": True, "reports": []})
 
-        # Fetch reports
         cur.execute(
             "SELECT id, report_date, site_name, drone_name, pilot_name, copilot_name, "
             "base_height_m, created_at, dgps_used_json, dgps_operators_json, "
@@ -310,7 +304,6 @@ def api_reports():
 
     return jsonify({"ok": True, "reports": reports})
 
-# ----------------- Report detail (view/edit/delete) -----------------
 def _get_report(report_id: int):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
         cur.execute(
@@ -321,19 +314,27 @@ def _get_report(report_id: int):
         )
         rep = cur.fetchone()
         if not rep:
-            return None, []
+            return None, [], [], []
         cur.execute(
             "SELECT id, flight_time_min, area_sq_km, uav_rover_file, drone_base_file_no "
             "FROM report_flights WHERE report_id = %s ORDER BY id",
             (report_id,)
         )
         flights = cur.fetchall()
-        return rep, flights
+        cur.execute(
+            "SELECT name FROM master_sites WHERE is_active = 1 ORDER BY name"
+        )
+        sites = cur.fetchall()
+        cur.execute(
+            "SELECT name FROM master_drones WHERE is_active = 1 ORDER BY name"
+        )
+        drones = cur.fetchall()
+        return rep, flights, sites, drones
 
 @app.route("/report/<int:report_id>", methods=["GET"])
 @login_required
 def report_detail(report_id):
-    rep, flights = _get_report(report_id)
+    rep, flights, _, _ = _get_report(report_id)
     if not rep:
         flash("Report not found.", "danger")
         return redirect(url_for("dashboard"))
@@ -342,7 +343,7 @@ def report_detail(report_id):
 @app.route("/report/<int:report_id>/preview", methods=["GET"])
 @login_required
 def report_preview(report_id):
-    rep, flights = _get_report(report_id)
+    rep, flights, _, _ = _get_report(report_id)
     if not rep:
         flash("Report not found.", "danger")
         return "", 404
@@ -351,16 +352,17 @@ def report_preview(report_id):
 @app.route("/report/<int:report_id>/edit", methods=["GET", "POST"])
 @login_required
 def report_edit(report_id):
-    rep, flights = _get_report(report_id)
+    rep, flights, sites, drones = _get_report(report_id)
     if not rep:
         flash("Report not found.", "danger")
         return redirect(url_for("edit_report_page"))
 
     if request.method == "GET":
-        return render_template("report_edit.html", report=rep, flights=flights)
+        return render_template("report_edit.html", report=rep, flights=flights, sites=sites, drones=drones)
 
-    # Collect and validate form data
     report_date = (request.form.get("report_date") or "").strip()
+    site_name = (request.form.get("site_name") or "").strip()
+    drone_name = (request.form.get("drone_name") or "").strip()
     pilot = (request.form.get("pilot_name") or "").strip()
     copilot = (request.form.get("copilot_name") or "").strip()
     remark = (request.form.get("remark") or "").strip()
@@ -369,14 +371,17 @@ def report_edit(report_id):
     grid_numbers = (request.form.get("grid_numbers") or "").strip()
     gcp_points = (request.form.get("gcp_points") or "").strip()
     try:
-        base_h = float(request.form.get("base_height_m") or rep["base_height_m"])
+        base_h = float(request.form.get("base_height_m") or 0)
     except Exception:
-        base_h = rep["base_height_m"]
+        base_h = 0
 
-    # Validate inputs
     errors = []
     if not report_date:
         errors.append("Report date is required.")
+    if not site_name:
+        errors.append("Site name is required.")
+    if not drone_name:
+        errors.append("Drone name is required.")
     if not pilot:
         errors.append("Pilot name is required.")
     if not copilot:
@@ -391,8 +396,9 @@ def report_edit(report_id):
         errors.append("Grid numbers is required.")
     if not gcp_points:
         errors.append("GCP points is required.")
+    if base_h <= 0:
+        errors.append("Base height must be > 0.")
 
-    # Validate flights
     flight_ids = request.form.getlist("flight_id[]")
     flight_times = request.form.getlist("flight_time[]")
     flight_areas = request.form.getlist("flight_area[]")
@@ -402,8 +408,8 @@ def report_edit(report_id):
     for i in range(len(flight_times)):
         try:
             flight_id = flight_ids[i] if i < len(flight_ids) and flight_ids[i] else None
-            time = float(flight_times[i]) if flight_times[i] else 0
-            area = float(flight_areas[i]) if flight_areas[i] else 0
+            time = float(flight_times[i]) if flight_times[i].strip() else 0
+            area = float(flight_areas[i]) if flight_areas[i].strip() else 0
             ubx = (flight_ubxs[i] or "").strip()
             base = (flight_bases[i] or "").strip()
             if time < 1:
@@ -411,9 +417,9 @@ def report_edit(report_id):
             if area <= 0:
                 errors.append(f"Flight {i+1}: Area must be > 0.")
             if not ubx:
-                errors.append(f"Flight {i+1}: UBX required.")
+                errors.append(f"Flight {i+1}: UBX is required.")
             if not base:
-                errors.append(f"Flight {i+1}: Base file required.")
+                errors.append(f"Flight {i+1}: Base file is required.")
             flights_data.append({
                 "id": flight_id,
                 "flight_time_min": time,
@@ -427,26 +433,23 @@ def report_edit(report_id):
     if errors:
         for err in errors:
             flash(err, "danger")
-        return jsonify({"ok": False, "message": "Validation errors. See flash messages."})
+        return jsonify({"ok": False, "message": "Validation errors occurred."})
 
-    # Update report
     try:
         with db_conn() as conn, conn.cursor() as cur:
             cur.execute(
-                "UPDATE reports SET report_date = %s, pilot_name = %s, copilot_name = %s, base_height_m = %s, "
-                "dgps_used_json = %s, dgps_operators_json = %s, grid_numbers_json = %s, "
+                "UPDATE reports SET report_date = %s, site_name = %s, drone_name = %s, pilot_name = %s, copilot_name = %s, "
+                "base_height_m = %s, dgps_used_json = %s, dgps_operators_json = %s, grid_numbers_json = %s, "
                 "gcp_points_json = %s, remark = %s, total_time_min = %s, total_area_sq_km = %s "
                 "WHERE id = %s",
                 (
-                    report_date, pilot, copilot, base_h,
-                    dgps_used, dgps_operators, grid_numbers, gcp_points,
-                    remark,
+                    report_date, site_name, drone_name, pilot, copilot, base_h,
+                    dgps_used, dgps_operators, grid_numbers, gcp_points, remark,
                     sum(f["flight_time_min"] for f in flights_data),
                     sum(f["area_sq_km"] for f in flights_data),
                     report_id
                 )
             )
-            # Update flights
             cur.execute("DELETE FROM report_flights WHERE report_id = %s", (report_id,))
             for f in flights_data:
                 cur.execute(
@@ -468,7 +471,6 @@ def report_delete(report_id):
     try:
         with db_conn() as conn, conn.cursor() as cur:
             cur.execute("DELETE FROM reports WHERE id = %s", (report_id,))
-            # report_flights are cascaded by FK constraint
     except Exception as e:
         logger.error(f"Failed to delete report {report_id}: {e}")
         flash("Failed to delete report due to a server error.", "danger")
@@ -476,6 +478,5 @@ def report_delete(report_id):
     flash("Report deleted successfully.", "success")
     return jsonify({"ok": True, "message": "Report deleted successfully."})
 
-# ----------------- Run -----------------
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=9000, debug=True)

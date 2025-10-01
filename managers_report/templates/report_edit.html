@@ -7,34 +7,44 @@
   <link href="{{ url_for('static', filename='app.css') }}" rel="stylesheet">
 </head>
 <body>
-  <div class="p-6 max-w-lg">
+  <div class="p-6 max-w-lg mx-auto">
     <h3 class="text-lg font-semibold text-gray-800 mb-4">Edit Report #{{ report.id }}</h3>
     <form method="post" action="{{ url_for('report_edit', report_id=report.id) }}" id="editForm" class="space-y-4">
       <div>
         <label for="report_date" class="block text-sm font-medium text-gray-700">Date</label>
         <input id="report_date" type="date" name="report_date" value="{{ report.report_date }}"
                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_report_date">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_report_date">Date is required</p>
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-700">Site</label>
-        <p class="mt-1 p-3 bg-gray-100 rounded-lg">{{ report.site_name }}</p>
+        <label for="site_name" class="block text-sm font-medium text-gray-700">Site</label>
+        <select id="site_name" name="site_name" class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for site in sites %}
+          <option value="{{ site.name }}" {{ 'selected' if site.name == report.site_name else '' }}>{{ site.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_site_name">Site is required</p>
       </div>
       <div>
-        <label class="block text-sm font-medium text-gray-700">Drone</label>
-        <p class="mt-1 p-3 bg-gray-100 rounded-lg">{{ report.drone_name }}</p>
+        <label for="drone_name" class="block text-sm font-medium text-gray-700">Drone</label>
+        <select id="drone_name" name="drone_name" class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          {% for drone in drones %}
+          <option value="{{ drone.name }}" {{ 'selected' if drone.name == report.drone_name else '' }}>{{ drone.name }}</option>
+          {% endfor %}
+        </select>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_drone_name">Drone is required</p>
       </div>
       <div>
         <label for="pilot_name" class="block text-sm font-medium text-gray-700">Pilot</label>
         <input id="pilot_name" type="text" name="pilot_name" value="{{ report.pilot_name or '' }}"
                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_pilot_name">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_pilot_name">Pilot name is required</p>
       </div>
       <div>
         <label for="copilot_name" class="block text-sm font-medium text-gray-700">Copilot</label>
         <input id="copilot_name" type="text" name="copilot_name" value="{{ report.copilot_name or '' }}"
                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_copilot_name">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_copilot_name">Copilot name is required</p>
       </div>
       <div>
         <label for="dgps_used" class="block text-sm font-medium text-gray-700">DGPS Used</label>
@@ -42,7 +52,7 @@
                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                placeholder="e.g. R4S-314,DA2-739">
         <p class="text-gray-600 text-sm mt-1">Separate multiple entries with commas</p>
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_dgps_used">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_dgps_used">DGPS used is required</p>
       </div>
       <div>
         <label for="dgps_operators" class="block text-sm font-medium text-gray-700">DGPS Operators</label>
@@ -50,7 +60,7 @@
                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                placeholder="e.g. Alice,Bob">
         <p class="text-gray-600 text-sm mt-1">Separate multiple entries with commas</p>
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_dgps_operators">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_dgps_operators">DGPS operators is required</p>
       </div>
       <div>
         <label for="grid_numbers" class="block text-sm font-medium text-gray-700">Grid Numbers</label>
@@ -58,7 +68,7 @@
                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                placeholder="e.g. H43R12A17,H43R12A22">
         <p class="text-gray-600 text-sm mt-1">Separate multiple entries with commas</p>
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_grid_numbers">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_grid_numbers">Grid numbers is required</p>
       </div>
       <div>
         <label for="gcp_points" class="block text-sm font-medium text-gray-700">GCP Points</label>
@@ -66,19 +76,19 @@
                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
                placeholder="e.g. CP1,CP2,CK1,CK2">
         <p class="text-gray-600 text-sm mt-1">Separate multiple entries with commas</p>
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_gcp_points">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_gcp_points">GCP points is required</p>
       </div>
       <div>
         <label for="base_height_m" class="block text-sm font-medium text-gray-700">Base Height (m)</label>
-        <input id="base_height_m" type="number" step="0.01" name="base_height_m" value="{{ report.base_height_m }}"
+        <input id="base_height_m" type="number" step="0.01" min="0.01" name="base_height_m" value="{{ report.base_height_m }}"
                class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_base_height_m">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_base_height_m">Base height must be > 0</p>
       </div>
       <div>
         <label for="remark" class="block text-sm font-medium text-gray-700">Remark</label>
         <textarea id="remark" name="remark" rows="4"
                   class="mt-1 w-full p-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">{{ report.remark or '' }}</textarea>
-        <p class="text-red-600 text-sm mt-1 hidden" id="err_remark">Required</p>
+        <p class="text-red-600 text-sm mt-1 hidden" id="err_remark">Remark is required</p>
       </div>
       <div>
         <div class="flex justify-between items-center mb-4">
@@ -101,11 +111,11 @@
             <tr class="border-b border-gray-200 flight-row">
               <td class="p-3">{{ loop.index }} <input type="hidden" name="flight_id[]" value="{{ f.id }}"></td>
               <td class="p-3">
-                <input type="number" name="flight_time[]" value="{{ f.flight_time_min }}"
+                <input type="number" min="1" name="flight_time[]" value="{{ f.flight_time_min }}"
                        class="w-full p-2 border border-gray-300 rounded-lg">
               </td>
               <td class="p-3">
-                <input type="number" step="0.001" name="flight_area[]" value="{{ '%.3f'|format(f.area_sq_km) }}"
+                <input type="number" step="0.001" min="0.001" name="flight_area[]" value="{{ '%.3f'|format(f.area_sq_km) }}"
                        class="w-full p-2 border border-gray-300 rounded-lg">
               </td>
               <td class="p-3">
@@ -129,8 +139,7 @@
       </div>
       <div class="flex gap-4">
         <button type="submit" class="py-3 px-6 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">Save Changes</button>
-        <button type="button" onclick="document.getElementById('editModal').classList.add('hidden')"
-                class="py-3 px-6 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition duration-200">Back</button>
+        <button type="button" onclick="closeModal()" class="py-3 px-6 bg-gray-600 text-white rounded-lg hover:bg-gray-700 font-semibold transition duration-200">Back</button>
       </div>
     </form>
   </div>
@@ -139,21 +148,25 @@
     function validateForm() {
       let hasError = false;
       const fields = [
-        { id: "report_date", errId: "err_report_date" },
-        { id: "pilot_name", errId: "err_pilot_name" },
-        { id: "copilot_name", errId: "err_copilot_name" },
-        { id: "dgps_used", errId: "err_dgps_used" },
-        { id: "dgps_operators", errId: "err_dgps_operators" },
-        { id: "grid_numbers", errId: "err_grid_numbers" },
-        { id: "gcp_points", errId: "err_gcp_points" },
-        { id: "base_height_m", errId: "err_base_height_m" },
-        { id: "remark", errId: "err_remark" }
+        { id: "report_date", errId: "err_report_date", msg: "Date is required" },
+        { id: "site_name", errId: "err_site_name", msg: "Site is required" },
+        { id: "drone_name", errId: "err_drone_name", msg: "Drone is required" },
+        { id: "pilot_name", errId: "err_pilot_name", msg: "Pilot name is required" },
+        { id: "copilot_name", errId: "err_copilot_name", msg: "Copilot name is required" },
+        { id: "dgps_used", errId: "err_dgps_used", msg: "DGPS used is required" },
+        { id: "dgps_operators", errId: "err_dgps_operators", msg: "DGPS operators is required" },
+        { id: "grid_numbers", errId: "err_grid_numbers", msg: "Grid numbers is required" },
+        { id: "gcp_points", errId: "err_gcp_points", msg: "GCP points is required" },
+        { id: "base_height_m", errId: "err_base_height_m", msg: "Base height must be > 0" },
+        { id: "remark", errId: "err_remark", msg: "Remark is required" }
       ];
 
       fields.forEach(field => {
         const input = document.getElementById(field.id);
         const error = document.getElementById(field.errId);
-        if (!input.value.trim()) {
+        const value = input.value.trim();
+        if (!value || (field.id === "base_height_m" && parseFloat(value) <= 0)) {
+          error.textContent = field.msg;
           error.classList.remove("hidden");
           hasError = true;
         } else {
@@ -171,20 +184,20 @@
         const area = parseFloat(flightAreas[i].value);
         const ubx = flightUbxs[i].value.trim();
         const base = flightBases[i].value.trim();
-        if (time < 1 || isNaN(time)) {
+        if (isNaN(time) || time < 1) {
           alert(`Flight ${i+1}: Time must be ≥ 1`);
           hasError = true;
         }
-        if (area <= 0 || isNaN(area)) {
+        if (isNaN(area) || area <= 0) {
           alert(`Flight ${i+1}: Area must be > 0`);
           hasError = true;
         }
         if (!ubx) {
-          alert(`Flight ${i+1}: UBX required`);
+          alert(`Flight ${i+1}: UBX is required`);
           hasError = true;
         }
         if (!base) {
-          alert(`Flight ${i+1}: Base file required`);
+          alert(`Flight ${i+1}: Base file is required`);
           hasError = true;
         }
       }
@@ -193,6 +206,7 @@
     }
 
     function addFlightRow() {
+      if (!confirm('Are you sure you want to add a new flight?')) return;
       const tbody = document.getElementById('flightsTableBody');
       const noFlightsRow = document.getElementById('noFlightsRow');
       if (noFlightsRow) {
@@ -204,11 +218,11 @@
       newRow.innerHTML = `
         <td class="p-3">${rowCount} <input type="hidden" name="flight_id[]" value=""></td>
         <td class="p-3">
-          <input type="number" name="flight_time[]" value=""
+          <input type="number" min="1" name="flight_time[]" value=""
                  class="w-full p-2 border border-gray-300 rounded-lg">
         </td>
         <td class="p-3">
-          <input type="number" step="0.001" name="flight_area[]" value=""
+          <input type="number" step="0.001" min="0.001" name="flight_area[]" value=""
                  class="w-full p-2 border border-gray-300 rounded-lg">
         </td>
         <td class="p-3">
@@ -227,6 +241,7 @@
     }
 
     function deleteFlightRow(button) {
+      if (!confirm('Are you sure you want to delete this flight?')) return;
       const row = button.closest('tr');
       row.remove();
       const tbody = document.getElementById('flightsTableBody');
@@ -240,9 +255,49 @@
       }
     }
 
-    document.querySelector("form")?.addEventListener("submit", function(e) {
-      if (!validateForm()) {
-        e.preventDefault();
+    function closeModal() {
+      const modal = document.getElementById('editModal');
+      if (modal) {
+        modal.classList.add('hidden');
+      } else {
+        window.location.href = '{{ url_for("edit_report_page") }}';
+      }
+    }
+
+    document.getElementById("editForm").addEventListener("submit", async function(e) {
+      e.preventDefault();
+      if (!validateForm()) return;
+
+      const form = this;
+      const formData = new FormData(form);
+      
+      try {
+        const response = await fetch(form.action, {
+          method: 'POST',
+          body: formData
+        });
+        const result = await response.json();
+        
+        if (result.ok) {
+          alert(result.message);
+          closeModal();
+          // Optionally refresh the parent page
+          window.location.reload();
+        } else {
+          alert(result.message || 'Failed to update report.');
+        }
+
+        // Fetch and display flash messages
+        const flashResponse = await fetch('/api/flash-messages');
+        if (flashResponse.ok) {
+          const flashMessages = await flashResponse.json();
+          flashMessages.forEach(msg => {
+            alert(`${msg.category}: ${msg.message}`);
+          });
+        }
+      } catch (error) {
+        console.error('Error submitting form:', error);
+        alert('An error occurred while saving the report.');
       }
     });
   </script>
