@@ -1,229 +1,255 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>View Reports — Manager Dashboard</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link href="{{ url_for('static', filename='app.css') }}" rel="stylesheet">
-  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-</head>
-<body class="bg-gray-100 text-gray-900 font-sans">
-  <div class="max-w-7xl mx-auto p-6">
+{% extends "base.html" %}
+{% block title %}View Reports — Manager Dashboard{% endblock %}
 
-    <!-- Refresh -->
-    <div class="flex items-end gap-4 mb-4">
-      <button id="vrRefresh" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold">
-        Refresh
-      </button>
-    </div>
+{% block content %}
+<div class="py-6">
+  <!-- Top controls -->
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-2xl font-bold text-gray-800">View Reports</h2>
+    <button id="vrRefreshBtn" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+      Refresh
+    </button>
+  </div>
 
-    <!-- Tabs -->
-    <div class="bg-white border border-gray-200 rounded-xl shadow-sm">
-      <div class="border-b border-gray-200 flex flex-wrap">
-        <button class="vr-tab px-4 py-3 font-semibold focus:outline-none" data-tab="date">Date</button>
-        <button class="vr-tab px-4 py-3 font-semibold focus:outline-none" data-tab="employee">Employee</button>
-        <button class="vr-tab px-4 py-3 font-semibold focus:outline-none" data-tab="sites">Sites</button>
-        <button class="vr-tab px-4 py-3 font-semibold focus:outline-none" data-tab="drones">Drones</button>
-      </div>
+  <!-- Tab bar (equal width) -->
+  <nav class="w-full rounded-xl border border-gray-200 bg-white shadow-sm mb-4">
+    <ul role="tablist" aria-label="View reports tabs" class="grid grid-cols-4 divide-x divide-gray-200">
+      <li>
+        <a role="tab" href="javascript:void(0)"
+           data-tab="date"
+           class="vr-tab-btn active block w-full text-center py-3 text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 focus:outline-none">
+          Date
+        </a>
+      </li>
+      <li>
+        <a role="tab" href="javascript:void(0)"
+           data-tab="employee"
+           class="vr-tab-btn block w-full text-center py-3 text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 focus:outline-none">
+          Employee
+        </a>
+      </li>
+      <li>
+        <a role="tab" href="javascript:void(0)"
+           data-tab="sites"
+           class="vr-tab-btn block w-full text-center py-3 text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 focus:outline-none">
+          Sites
+        </a>
+      </li>
+      <li>
+        <a role="tab" href="javascript:void(0)"
+           data-tab="drones"
+           class="vr-tab-btn block w-full text-center py-3 text-sm font-medium text-gray-600 hover:bg-blue-50 hover:text-blue-700 focus:outline-none">
+          Drones
+        </a>
+      </li>
+    </ul>
+  </nav>
 
-      <div class="p-5">
+  <!-- Panels -->
+  <div class="vr-panels space-y-6">
 
-        <!-- TAB: Date -->
-        <section id="vrTab_date" class="vr-tabpanel hidden">
-          <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mb-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700">Mode</label>
-              <select id="vrDateMode" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
-                <option value="single">Single Date</option>
-                <option value="range">Date Range</option>
-              </select>
-            </div>
-            <div id="vrDateSingleWrap">
-              <label class="block text-sm font-medium text-gray-700">Select Date</label>
-              <input id="vrDateSingle" type="date" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
-            </div>
-            <div id="vrDateRangeWrap" class="hidden grid grid-cols-2 gap-2 sm:col-span-2 lg:col-span-1">
+    <!-- Date tab -->
+    <section id="vrTab-date" class="vr-panel">
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
+        <div class="flex flex-wrap items-end gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Mode</label>
+            <select id="vrDateMode" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="single" selected>Single Date</option>
+              <option value="range">Date Range</option>
+            </select>
+          </div>
+
+          <div id="vrDateSingleWrap">
+            <label class="block text-sm font-medium text-gray-700">Date</label>
+            <input type="date" id="vrDateSingle" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+
+          <div id="vrDateRangeWrap" class="hidden">
+            <div class="flex items-end gap-3">
               <div>
                 <label class="block text-sm font-medium text-gray-700">From</label>
-                <input id="vrDateFrom" type="date" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
+                <input type="date" id="vrDateFrom" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700">To</label>
-                <input id="vrDateTo" type="date" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
+                <input type="date" id="vrDateTo" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
               </div>
             </div>
           </div>
 
-          <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <table class="w-full table-auto">
-              <thead>
-                <tr class="bg-blue-50 text-gray-700">
-                  <th class="p-3 font-bold text-left">Sr. No.</th>
-                  <th class="p-3 font-bold text-left">Employee First Name</th>
-                  <th class="p-3 font-bold text-left">Employee Last Name</th>
-                  <th class="p-3 font-bold text-left">Report Preview</th>
-                </tr>
-              </thead>
-              <tbody id="vrDateTbody">
-                <!-- rows -->
-              </tbody>
-            </table>
-          </div>
+          <button id="vrDateFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+            Apply
+          </button>
+        </div>
 
-          <div class="flex items-center justify-between mt-4">
-            <div class="text-sm text-gray-600" id="vrDateMsg"></div>
-            <button class="py-2 px-4 border rounded-lg" id="vrDateDownload">Download</button>
-          </div>
-        </section>
+        <div class="overflow-auto border border-gray-200 rounded-xl">
+          <table class="w-full table-auto">
+            <thead>
+              <tr class="bg-blue-50 text-gray-700">
+                <th class="p-3 text-left font-bold">Sr. No.</th>
+                <th class="p-3 text-left font-bold">Employee First Name</th>
+                <th class="p-3 text-left font-bold">Employee Last Name</th>
+                <th class="p-3 text-left font-bold">Report Preview</th>
+              </tr>
+            </thead>
+            <tbody id="vrDateTbody"></tbody>
+          </table>
+        </div>
 
-        <!-- TAB: Employee -->
-        <section id="vrTab_employee" class="vr-tabpanel hidden">
-          <div class="grid sm:grid-cols-3 gap-4 mb-4">
-            <div class="sm:col-span-2">
-              <label class="block text-sm font-medium text-gray-700">Select Employee</label>
-              <select id="vrEmpSelect" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
-                <option value="">-- Select Employee --</option>
-                {% for emp in employees %}
-                  <option value="{{ emp.telegram_id }}">{{ emp.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-
-          <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <table class="w-full table-auto">
-              <thead>
-                <tr class="bg-blue-50 text-gray-700">
-                  <th class="p-3 font-bold text-left">Sr. No.</th>
-                  <th class="p-3 font-bold text-left">Date</th>
-                  <th class="p-3 font-bold text-left">Site</th>
-                  <th class="p-3 font-bold text-left">Submitted At</th>
-                  <th class="p-3 font-bold text-left">Report Preview</th>
-                </tr>
-              </thead>
-              <tbody id="vrEmpTbody">
-                <!-- rows -->
-              </tbody>
-            </table>
-          </div>
-
-          <div class="flex items-center justify-between mt-4">
-            <div class="text-sm text-gray-600" id="vrEmpMsg"></div>
-            <button class="py-2 px-4 border rounded-lg" id="vrEmpDownload">Download</button>
-          </div>
-        </section>
-
-        <!-- TAB: Sites -->
-        <section id="vrTab_sites" class="vr-tabpanel hidden">
-          <div class="grid sm:grid-cols-3 gap-4 mb-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700">Select Site</label>
-              <select id="vrSiteSelect" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
-                <option value="">-- Select Site --</option>
-                {% for s in sites %}
-                  <option value="{{ s.name }}">{{ s.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="sm:col-span-2 grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-sm font-medium text-gray-700">Filter by Date (optional)</label>
-                <input id="vrSiteDate" type="date" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
-              </div>
-            </div>
-          </div>
-
-          <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <table class="w-full table-auto">
-              <thead>
-                <tr class="bg-blue-50 text-gray-700">
-                  <th class="p-3 font-bold text-left">Sr. No.</th>
-                  <th class="p-3 font-bold text-left">Employee First Name</th>
-                  <th class="p-3 font-bold text-left">Employee Last Name</th>
-                  <th class="p-3 font-bold text-left">Date</th>
-                  <th class="p-3 font-bold text-left">Report Preview</th>
-                </tr>
-              </thead>
-              <tbody id="vrSiteTbody">
-                <!-- rows -->
-              </tbody>
-            </table>
-          </div>
-
-          <div class="flex items-center justify-between mt-4">
-            <div class="text-sm text-gray-700">
-              Total Area (sq km): <span id="vrSiteTotal" class="font-semibold">0.000</span>
-            </div>
-            <button class="py-2 px-4 border rounded-lg" id="vrSiteDownload">Download</button>
-          </div>
-        </section>
-
-        <!-- TAB: Drones -->
-        <section id="vrTab_drones" class="vr-tabpanel hidden">
-          <div class="grid sm:grid-cols-3 gap-4 mb-4">
-            <div>
-              <label class="block text-sm font-medium text-gray-700">Select Drone</label>
-              <select id="vrDroneSelect" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
-                <option value="">-- Select Drone --</option>
-                {% for d in drones %}
-                  <option value="{{ d.name }}">{{ d.name }}</option>
-                {% endfor %}
-              </select>
-            </div>
-            <div class="sm:col-span-2 grid grid-cols-2 gap-2">
-              <div>
-                <label class="block text-sm font-medium text-gray-700">Filter by Date (optional)</label>
-                <input id="vrDroneDate" type="date" class="mt-1 p-2 border border-gray-300 rounded-lg w-full">
-              </div>
-            </div>
-          </div>
-
-          <div class="bg-white border border-gray-200 rounded-xl overflow-hidden">
-            <table class="w-full table-auto">
-              <thead>
-                <tr class="bg-blue-50 text-gray-700">
-                  <th class="p-3 font-bold text-left">Sr. No.</th>
-                  <th class="p-3 font-bold text-left">Employee First Name</th>
-                  <th class="p-3 font-bold text-left">Employee Last Name</th>
-                  <th class="p-3 font-bold text-left">Date</th>
-                  <th class="p-3 font-bold text-left">Report Preview</th>
-                </tr>
-              </thead>
-              <tbody id="vrDroneTbody">
-                <!-- rows -->
-              </tbody>
-            </table>
-          </div>
-
-          <div class="flex items-center justify-between mt-4">
-            <div class="text-sm text-gray-700">
-              Total Flights: <span id="vrDroneTotal" class="font-semibold">0</span>
-            </div>
-            <button class="py-2 px-4 border rounded-lg" id="vrDroneDownload">Download</button>
-          </div>
-        </section>
-
+        <div class="flex justify-end">
+          <button class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900" disabled>
+            Download (coming soon)
+          </button>
+        </div>
       </div>
-    </div>
-  </div>
+    </section>
 
-  <!-- Preview Modal (reuses your same pattern) -->
-  <div id="viewModal" class="fixed inset-0 hidden z-50 overflow-auto bg-black bg-opacity-50 flex items-center justify-center">
-    <div class="bg-white p-6 rounded-xl shadow-lg max-w-2xl w-full max-h-screen overflow-y-auto">
-      <h3 class="text-lg font-semibold text-gray-800 mb-4">Report Preview</h3>
-      <div id="viewModalContent"></div>
-      <button onclick="document.getElementById('viewModal').classList.add('hidden')" class="mt-4 py-2 px-4 bg-gray-600 text-white rounded-lg hover:bg-gray-700">Close</button>
-    </div>
-  </div>
+    <!-- Employee tab -->
+    <section id="vrTab-employee" class="vr-panel hidden">
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
+        <div class="flex flex-wrap items-end gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Employee</label>
+            <select id="vrEmpSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">-- Select Employee --</option>
+              {% for e in employees %}
+                <option value="{{ e.telegram_id }}">{{ e.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <button id="vrEmpFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+            Apply
+          </button>
+        </div>
 
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
-  <script>
-    // activate Date tab by default
-    document.addEventListener('DOMContentLoaded', () => {
-      if (window.MGR && MGR.initViewReports) {
-        MGR.initViewReports();
-      }
-    });
-  </script>
-</body>
-</html>
+        <div class="overflow-auto border border-gray-200 rounded-xl">
+          <table class="w-full table-auto">
+            <thead>
+              <tr class="bg-blue-50 text-gray-700">
+                <th class="p-3 text-left font-bold">Sr. No.</th>
+                <th class="p-3 text-left font-bold">Date</th>
+                <th class="p-3 text-left font-bold">Site Name</th>
+                <th class="p-3 text-left font-bold">Submitted At</th>
+                <th class="p-3 text-left font-bold">Report Preview</th>
+              </tr>
+            </thead>
+            <tbody id="vrEmpTbody"></tbody>
+          </table>
+        </div>
+
+        <div class="flex justify-end">
+          <button class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900" disabled>
+            Download (coming soon)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Sites tab -->
+    <section id="vrTab-sites" class="vr-panel hidden">
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
+        <div class="flex flex-wrap items-end gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Site</label>
+            <select id="vrSiteSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">-- Select Site --</option>
+              {% for s in sites %}
+                <option value="{{ s.name }}">{{ s.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Date (optional)</label>
+            <input type="date" id="vrSiteDate" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <button id="vrSiteFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+            Apply
+          </button>
+        </div>
+
+        <div class="overflow-auto border border-gray-200 rounded-xl">
+          <table class="w-full table-auto">
+            <thead>
+              <tr class="bg-blue-50 text-gray-700">
+                <th class="p-3 text-left font-bold">Sr. No.</th>
+                <th class="p-3 text-left font-bold">Employee First Name</th>
+                <th class="p-3 text-left font-bold">Employee Last Name</th>
+                <th class="p-3 text-left font-bold">Date</th>
+                <th class="p-3 text-left font-bold">Report Preview</th>
+              </tr>
+            </thead>
+            <tbody id="vrSiteTbody"></tbody>
+          </table>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div class="text-sm text-gray-700">
+            <span class="font-medium">Total Area (sq km):</span>
+            <span id="vrSiteTotalArea">0.000</span>
+          </div>
+          <button class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900" disabled>
+            Download (coming soon)
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Drones tab -->
+    <section id="vrTab-drones" class="vr-panel hidden">
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
+        <div class="flex flex-wrap items-end gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Drone</label>
+            <select id="vrDroneSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+              <option value="">-- Select Drone --</option>
+              {% for d in drones %}
+                <option value="{{ d.name }}">{{ d.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700">Date (optional)</label>
+            <input type="date" id="vrDroneDate" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+          </div>
+          <button id="vrDroneFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+            Apply
+          </button>
+        </div>
+
+        <div class="overflow-auto border border-gray-200 rounded-xl">
+          <table class="w-full table-auto">
+            <thead>
+              <tr class="bg-blue-50 text-gray-700">
+                <th class="p-3 text-left font-bold">Sr. No.</th>
+                <th class="p-3 text-left font-bold">Employee First Name</th>
+                <th class="p-3 text-left font-bold">Employee Last Name</th>
+                <th class="p-3 text-left font-bold">Date</th>
+                <th class="p-3 text-left font-bold">Report Preview</th>
+              </tr>
+            </thead>
+            <tbody id="vrDroneTbody"></tbody>
+          </table>
+        </div>
+
+        <div class="flex items-center justify-between">
+          <div class="text-sm text-gray-700">
+            <span class="font-medium">Total Flights:</span>
+            <span id="vrDroneTotalFlights">0</span>
+          </div>
+          <button class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900" disabled>
+            Download (coming soon)
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Tab logic is in static/app.js (the script you already have).
+</script>
+{% endblock %}
