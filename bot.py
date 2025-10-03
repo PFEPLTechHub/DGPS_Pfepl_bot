@@ -74,6 +74,8 @@ ROLE_EMPLOYEE = 2
 
 # Conversation states
 ASK_FIRST, ASK_LAST, ASK_PHONE = range(3)
+ASK_MGR_LOGIN, ASK_MGR_PASS = range(3, 5)  # <-- NEW (3,4)
+
 # Masters text-entry states
 MASTERS_ADD_NAME, MASTERS_RENAME_NAME = range(100, 102)
 
@@ -112,6 +114,23 @@ def get_staff_record(telegram_id):
             (telegram_id, ROLE_ADMIN, ROLE_MANAGER),
         )
         return cur.fetchone()
+
+def manager_login_by_tg(telegram_id):
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        cur.execute("SELECT * FROM manager_logins WHERE telegram_id=%s LIMIT 1", (telegram_id,))
+        return cur.fetchone()
+
+def is_login_taken(login_id: str) -> bool:
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute("SELECT 1 FROM manager_logins WHERE login=%s LIMIT 1", (login_id,))
+        return cur.fetchone() is not None
+
+def create_manager_login(login_id: str, password: str, telegram_id: int):
+    with db_conn() as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO manager_logins (login, password, telegram_id, is_active) VALUES (%s,%s,%s,1)",
+            (login_id.strip(), password, telegram_id),
+        )
 
 def create_invitation(manager_id, invite_role=ROLE_EMPLOYEE):
     token = str(uuid.uuid4())
