@@ -269,14 +269,14 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // -------------------- View Reports (Tabbed) --------------------
-// One single, modern implementation (removes older/duplicate blocks)
+// One single, modern implementation (replaces older/duplicate blocks)
 (function () {
   const datePanel = document.getElementById('vrTab-date');
   if (!datePanel) return; // not on View Reports page
 
   const TABS_KEY = 'viewReports.activeTab';
   const getActiveTab = () => sessionStorage.getItem(TABS_KEY) || 'date';
-  const setActiveTab = (t) => sessionStorage.setItem(TABS_KEY, t);
+  const setActiveTab  = (t) => sessionStorage.setItem(TABS_KEY, t);
 
   function activateTab(tab) {
     document.querySelectorAll('.vr-tab-btn').forEach(btn => {
@@ -288,20 +288,22 @@ document.addEventListener('DOMContentLoaded', () => {
     setActiveTab(tab);
   }
 
+  // tab buttons
   document.querySelectorAll('.vr-tab-btn').forEach(btn => {
     btn.addEventListener('click', () => activateTab(btn.dataset.tab));
   });
 
+  // date controls
   const modeSel    = document.getElementById('vrDateMode');
   const singleWrap = document.getElementById('vrDateSingleWrap');
   const rangeWrap  = document.getElementById('vrDateRangeWrap');
   const singleDate = document.getElementById('vrDateSingle');
   const fromDate   = document.getElementById('vrDateFrom');
   const toDate     = document.getElementById('vrDateTo');
-  
+
   if (modeSel) {
     modeSel.addEventListener('change', () => {
-      const mode = modeSel.value;
+      const mode = (modeSel.value || 'single').toLowerCase();
       if (mode === 'range') {
         singleWrap.classList.add('hidden');
         rangeWrap.classList.remove('hidden');
@@ -311,6 +313,7 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+
   // ---- Download helpers (common) ----
   function setDownloadEnabled(tab, enabled) {
     const map = {
@@ -378,38 +381,43 @@ document.addEventListener('DOMContentLoaded', () => {
     e.preventDefault();
     if (!e.currentTarget.disabled) window.location.href = downloadUrlForCurrentTab('drones');
   });
-  // Date
-  
 
+  // ---- Helpers ----
   async function fetchJSON(url) {
     const res = await fetch(url);
     if (!res.ok) throw new Error('Network error');
     return res.json();
   }
 
+  // ---- Loaders (each enables/disables download based on filters + rows) ----
   async function loadDateTab() {
     const mode = (modeSel?.value || 'single').toLowerCase();
     let url = '/api/view/date?mode=' + encodeURIComponent(mode);
+
     if (mode === 'range') {
       const f = fromDate?.value || '';
       const t = toDate?.value || '';
       if (!f || !t) {
         alert('Please select From and To dates.');
+        setDownloadEnabled('date', false);
         return;
       }
       url += `&from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`;
     } else {
       const d = singleDate?.value || '';
-      if (d) url += `&date=${encodeURIComponent(d)}`;
+      if (!d) {
+        // no date chosen — nothing to download
+        setDownloadEnabled('date', false);
+        // allow empty fetch (server may default), but you asked to avoid default reloads; so return.
+        return;
+      }
+      url += `&date=${encodeURIComponent(d)}`;
     }
 
     try {
       const data = await fetchJSON(url);
       const tbody = document.getElementById('vrDateTbody');
       tbody.innerHTML = '';
-      if (data.message && (data.rows || []).length === 0) {
-        alert(data.message);
-      }
       (data.rows || []).forEach(r => {
         const tr = document.createElement('tr');
         tr.className = 'border-b border-gray-200';
@@ -423,9 +431,14 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         tbody.appendChild(tr);
       });
+      const hasRows   = (data.rows || []).length > 0;
+      const filtersOk = (mode === 'range') ? (fromDate?.value && toDate?.value) : !!(singleDate?.value);
+      setDownloadEnabled('date', hasRows && !!filtersOk);
+      if (data.message && !hasRows) alert(data.message);
     } catch (e) {
       alert('Failed to load data.');
       console.error(e);
+      setDownloadEnabled('date', false);
     }
   }
 
@@ -434,6 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const tg = empSel?.value || '';
     if (!tg) {
       alert('Please select an employee.');
+      setDownloadEnabled('employee', false);
       return;
     }
     const url = `/api/view/employee?employee=${encodeURIComponent(tg)}`;
@@ -456,9 +470,13 @@ document.addEventListener('DOMContentLoaded', () => {
         `;
         tbody.appendChild(tr);
       });
+      const hasRows = (data.rows || []).length > 0;
+      const filtersOk = !!tg;
+      setDownloadEnabled('employee', hasRows && filtersOk);
     } catch (e) {
       alert('Failed to load data.');
       console.error(e);
+      setDownloadEnabled('employee', false);
     }
   }
 
@@ -468,6 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const d = (document.getElementById('vrSiteDate')?.value || '');
     if (!site) {
       alert('Please select a site.');
+      setDownloadEnabled('sites', false);
       return;
     }
     let url = `/api/view/sites?site=${encodeURIComponent(site)}`;
@@ -493,9 +512,13 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.appendChild(tr);
       });
       totalEl.textContent = data.total_area || '0.000';
+      const hasRows = (data.rows || []).length > 0;
+      const filtersOk = !!site;
+      setDownloadEnabled('sites', hasRows && filtersOk);
     } catch (e) {
       alert('Failed to load data.');
       console.error(e);
+      setDownloadEnabled('sites', false);
     }
   }
 
@@ -505,6 +528,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const d = (document.getElementById('vrDroneDate')?.value || '');
     if (!dr) {
       alert('Please select a drone.');
+      setDownloadEnabled('drones', false);
       return;
     }
     let url = `/api/view/drones?drone=${encodeURIComponent(dr)}`;
@@ -530,9 +554,13 @@ document.addEventListener('DOMContentLoaded', () => {
         tbody.appendChild(tr);
       });
       totalEl.textContent = data.total_flights ?? 0;
+      const hasRows = (data.rows || []).length > 0;
+      const filtersOk = !!dr;
+      setDownloadEnabled('drones', hasRows && filtersOk);
     } catch (e) {
       alert('Failed to load data.');
       console.error(e);
+      setDownloadEnabled('drones', false);
     }
   }
 
@@ -558,14 +586,19 @@ document.addEventListener('DOMContentLoaded', () => {
   document.getElementById('vrRefreshBtn')?.addEventListener('click', (e) => {
     e.preventDefault();
     const tab = getActiveTab();
-    if (tab === 'date') return loadDateTab();
-    if (tab === 'employee') return loadEmployeeTab();
-    if (tab === 'sites') return loadSitesTab();
-    if (tab === 'drones') return loadDronesTab();
+    if (tab === 'date')    return loadDateTab();
+    if (tab === 'employee')return loadEmployeeTab();
+    if (tab === 'sites')   return loadSitesTab();
+    if (tab === 'drones')  return loadDronesTab();
   });
 
   // Init
   const initial = getActiveTab();
   activateTab(initial);
-  // Don’t auto-load Date data; wait for Apply (per your requirement)
+
+  // Disable all download buttons initially (no stale downloads)
+  ['date','employee','sites','drones'].forEach(t => setDownloadEnabled(t, false));
+
+  // per your requirement: do NOT auto-load data on initial; wait for user to click Apply
 })();
+
