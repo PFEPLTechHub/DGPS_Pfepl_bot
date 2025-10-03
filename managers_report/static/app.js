@@ -298,7 +298,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const singleDate = document.getElementById('vrDateSingle');
   const fromDate   = document.getElementById('vrDateFrom');
   const toDate     = document.getElementById('vrDateTo');
-
+  
   if (modeSel) {
     modeSel.addEventListener('change', () => {
       const mode = modeSel.value;
@@ -311,6 +311,75 @@ document.addEventListener('DOMContentLoaded', () => {
       }
     });
   }
+  // ---- Download helpers (common) ----
+  function setDownloadEnabled(tab, enabled) {
+    const map = {
+      date:    'vrDateDownload',
+      employee:'vrEmpDownload',
+      sites:   'vrSiteDownload',
+      drones:  'vrDroneDownload'
+    };
+    const btn = document.getElementById(map[tab]);
+    if (!btn) return;
+    btn.disabled = !enabled;
+    btn.classList.toggle('opacity-50', !enabled);
+    btn.classList.toggle('cursor-not-allowed', !enabled);
+  }
+
+  function downloadUrlForCurrentTab(tab) {
+    const base = '/view-reports/download?tab=' + encodeURIComponent(tab);
+
+    if (tab === 'date') {
+      const mode = (document.getElementById('vrDateMode')?.value || 'single').toLowerCase();
+      if (mode === 'range') {
+        const f = document.getElementById('vrDateFrom')?.value || '';
+        const t = document.getElementById('vrDateTo')?.value || '';
+        return `${base}&mode=range&from=${encodeURIComponent(f)}&to=${encodeURIComponent(t)}`;
+      } else {
+        const d = document.getElementById('vrDateSingle')?.value || '';
+        return `${base}&mode=single&date=${encodeURIComponent(d)}`;
+      }
+    }
+
+    if (tab === 'employee') {
+      const emp = document.getElementById('vrEmpSelect')?.value || '';
+      return `${base}&employee=${encodeURIComponent(emp)}`;
+    }
+
+    if (tab === 'sites') {
+      const site = document.getElementById('vrSiteSelect')?.value || '';
+      const d    = document.getElementById('vrSiteDate')?.value || '';
+      return `${base}&site=${encodeURIComponent(site)}&date=${encodeURIComponent(d)}`;
+    }
+
+    if (tab === 'drones') {
+      const dr = document.getElementById('vrDroneSelect')?.value || '';
+      const d  = document.getElementById('vrDroneDate')?.value || '';
+      return `${base}&drone=${encodeURIComponent(dr)}&date=${encodeURIComponent(d)}`;
+    }
+
+    return base;
+  }
+
+  // ---- Download buttons (per tab) ----
+  document.getElementById('vrDateDownload')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!e.currentTarget.disabled) window.location.href = downloadUrlForCurrentTab('date');
+  });
+  document.getElementById('vrEmpDownload')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!e.currentTarget.disabled) window.location.href = downloadUrlForCurrentTab('employee');
+  });
+  document.getElementById('vrSiteDownload')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!e.currentTarget.disabled) window.location.href = downloadUrlForCurrentTab('sites');
+  });
+  document.getElementById('vrDroneDownload')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    if (!e.currentTarget.disabled) window.location.href = downloadUrlForCurrentTab('drones');
+  });
+  // Date
+  
 
   async function fetchJSON(url) {
     const res = await fetch(url);

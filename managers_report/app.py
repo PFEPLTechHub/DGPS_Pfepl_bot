@@ -6,8 +6,9 @@ from datetime import datetime
 from dotenv import load_dotenv
 from flask import (
     Flask, render_template, request, redirect, url_for,
-    session, jsonify, flash, get_flashed_messages
+    session, jsonify, flash, get_flashed_messages, send_file
 )
+
 import mysql.connector
 from mysql.connector import pooling
 import json
@@ -806,6 +807,369 @@ def api_view_drones():
         return jsonify({"ok": False, "rows": [], "total_flights": 0, "message": "Server error"})
 
     return jsonify({"ok": True, "rows": rows, "total_flights": total_flights})
+
+#download working code excel
+@app.get("/view-reports/download")
+@login_required
+def view_reports_download():
+    """
+    Create an Excel workbook for the active View Reports tab:
+      - tab = date | employee | sites | drones
+      - Returns an .xlsx with two sheets: 'Summary' and 'Detailed Info'
+    Filters (per tab) come in as querystring params.
+    """
+    tab = (request.args.get("tab") or "").strip().lower()
+    if tab not in ("date", "employee", "sites", "drones"):
+        return jsonify({"ok": False, "message": "Invalid tab."}), 400
+
+    mgr_tg_id = session["manager_tg"]
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    # Helper: get manager's employee tg list + names
+    def _team_employees():
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute(
+                "SELECT u.telegram_id, u.first_name, u.last_name, u.username "
+                "FROM users u "
+                "WHERE u.role = 2 AND u.is_active = 1 AND u.manager_id = "
+                "(SELECT id FROM users WHERE telegram_id = %s LIMIT 1) "
+                "ORDER BY u.first_name, u.last_name, u.id",
+                (mgr_tg_id,)
+            )
+            rows = cur.fetchall()
+        names = {}
+        tgs = []
+        for e in rows:
+            fn = (e["first_name"] or "").strip()
+            ln = (e["last_name"] or "").strip()
+            full = (fn + " " + ln).strip() or (e["username"] or f"tg:{e['telegram_id']}")
+            names[e["telegram_id"]] = (fn, ln, full)
+            tgs.append(e["telegram_id"])
+        return tgs, names
+
+    emp_tgs, emp_names = _team_employees()
+    if not emp_tgs:
+        return jsonify({"ok": False, "message": "No employees assigned."}), 400
+
+    def _rows_date():
+        mode = (request.args.get("mode") or "single").lower()
+        rows = []
+        summary_rows = []  # Sr., first_name, last_name, created_at, id
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            if mode == "range":
+                d_from = (request.args.get("from") or "").strip()
+                d_to = (request.args.get("to") or "").strip()
+                if not d_from or not d_to:
+                    return {"message": "Please select From and To dates.", "rows": [], "summary": [], "range": (d_from, d_to)}
+                if d_to > today:
+                    return {"message": "Future To date selected. No data.", "rows": [], "summary": [], "range": (d_from, d_to)}
+                placeholders = ",".join(["%s"] * len(emp_tgs))
+                cur.execute(
+                    f"SELECT r.id, r.employee_telegram_id, r.report_date, r.created_at "
+                    f"FROM reports r WHERE r.report_date BETWEEN %s AND %s AND r.employee_telegram_id IN ({placeholders}) "
+                    f"ORDER BY r.created_at DESC",
+                    [d_from, d_to] + emp_tgs
+                )
+                data = cur.fetchall()
+                sr = 1
+                for r in data:
+                    fn, ln, _ = emp_names.get(r["employee_telegram_id"], ("", "", ""))
+                    summary_rows.append([sr, fn, ln, fmt_ist(r["created_at"]), r["id"]])
+                    sr += 1
+                return {"rows": data, "summary": summary_rows, "mode": "range", "range": (d_from, d_to)}
+            else:
+                d = (request.args.get("date") or "").strip()
+                if not d:
+                    return {"message": "Please select a date.", "rows": [], "summary": [], "date": d}
+                if d > today:
+                    return {"message": "Future date selected. No data.", "rows": [], "summary": [], "date": d}
+                placeholders = ",".join(["%s"] * len(emp_tgs))
+                cur.execute(
+                    f"SELECT r.id, r.employee_telegram_id, r.report_date, r.created_at "
+                    f"FROM reports r WHERE r.report_date = %s AND r.employee_telegram_id IN ({placeholders}) "
+                    f"ORDER BY r.created_at DESC",
+                    [d] + emp_tgs
+                )
+                data = cur.fetchall()
+                sr = 1
+                for r in data:
+                    fn, ln, _ = emp_names.get(r["employee_telegram_id"], ("", "", ""))
+                    summary_rows.append([sr, fn, ln, fmt_ist(r["created_at"]), r["id"]])
+                    sr += 1
+                return {"rows": data, "summary": summary_rows, "mode": "single", "date": d}
+
+    def _rows_employee():
+        tg = (request.args.get("employee") or "").strip()
+        if not tg:
+            return {"message": "Select an employee.", "rows": [], "summary": [], "emp_name": ""}
+        try:
+            tg = int(tg)
+        except:
+            return {"message": "Invalid employee.", "rows": [], "summary": [], "emp_name": ""}
+
+        if tg not in emp_names:
+            return {"message": "Employee not in your team.", "rows": [], "summary": [], "emp_name": ""}
+
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute(
+                "SELECT id, report_date, site_name, created_at "
+                "FROM reports WHERE employee_telegram_id = %s ORDER BY created_at DESC",
+                (tg,)
+            )
+            data = cur.fetchall()
+        # Summary rows: Sr., Date, Site, Submitted at, id
+        summary = []
+        for i, r in enumerate(data, start=1):
+            summary.append([i, r["report_date"], r["site_name"], fmt_ist(r["created_at"]), r["id"]])
+        return {"rows": data, "summary": summary, "emp_name": " ".join([x for x in emp_names[tg][:2] if x])}
+
+    def _rows_sites():
+        site = (request.args.get("site") or "").strip()
+        d = (request.args.get("date") or "").strip()
+        if not site:
+            return {"message": "Select a site.", "rows": [], "summary": [], "site": site, "date": d, "total_area": 0.0}
+
+        placeholders = ",".join(["%s"] * len(emp_tgs))
+        params = []
+        where = f"r.site_name = %s AND r.employee_telegram_id IN ({placeholders})"
+        params.append(site)
+        params += emp_tgs
+        if d:
+            where += " AND r.report_date = %s"
+            params.append(d)
+
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute(
+                f"SELECT r.id, r.employee_telegram_id, r.report_date, r.created_at, r.total_area_sq_km "
+                f"FROM reports r WHERE {where} ORDER BY r.created_at DESC",
+                params
+            )
+            data = cur.fetchall()
+        summary = []
+        total_area = 0.0
+        for i, r in enumerate(data, start=1):
+            fn, ln, _ = emp_names.get(r["employee_telegram_id"], ("", "", ""))
+            summary.append([i, fn, ln, r["report_date"], fmt_ist(r["created_at"]), r["id"]])
+            try:
+                total_area += float(r["total_area_sq_km"] or 0)
+            except:
+                pass
+        return {"rows": data, "summary": summary, "site": site, "date": d, "total_area": round(total_area, 3)}
+
+    def _rows_drones():
+        drone = (request.args.get("drone") or "").strip()
+        d = (request.args.get("date") or "").strip()
+        if not drone:
+            return {"message": "Select a drone.", "rows": [], "summary": [], "drone": drone, "date": d, "total_flights": 0, "total_time": 0}
+
+        placeholders = ",".join(["%s"] * len(emp_tgs))
+        params = []
+        where = f"r.drone_name = %s AND r.employee_telegram_id IN ({placeholders})"
+        params.append(drone)
+        params += emp_tgs
+        if d:
+            where += " AND r.report_date = %s"
+            params.append(d)
+
+        with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+            cur.execute(
+                f"SELECT r.id, r.employee_telegram_id, r.report_date, r.created_at "
+                f"FROM reports r WHERE {where} ORDER BY r.created_at DESC",
+                params
+            )
+            data = cur.fetchall()
+
+            # flights count + total time from report_flights
+            if data:
+                ids = [x["id"] for x in data]
+                placeholders2 = ",".join(["%s"] * len(ids))
+                cur.execute(
+                    f"SELECT rf.report_id, COUNT(*) AS c, SUM(rf.flight_time_min) AS t "
+                    f"FROM report_flights rf WHERE rf.report_id IN ({placeholders2}) "
+                    f"GROUP BY rf.report_id",
+                    ids
+                )
+                agg = {row["report_id"]: (int(row["c"] or 0), int(row["t"] or 0)) for row in cur.fetchall()}
+            else:
+                agg = {}
+
+        summary = []
+        total_flights = 0
+        total_time = 0
+        for i, r in enumerate(data, start=1):
+            fn, ln, _ = emp_names.get(r["employee_telegram_id"], ("", "", ""))
+            c, t = agg.get(r["id"], (0, 0))
+            total_flights += c
+            total_time += t
+            summary.append([i, fn, ln, r["report_date"], fmt_ist(r["created_at"]), r["id"]])
+        return {"rows": data, "summary": summary, "drone": drone, "date": d, "total_flights": total_flights, "total_time": total_time}
+
+    # Pull rows & meta for the selected tab
+    if tab == "date":
+        payload = _rows_date()
+    elif tab == "employee":
+        payload = _rows_employee()
+    elif tab == "sites":
+        payload = _rows_sites()
+    else:
+        payload = _rows_drones()
+
+    rows = payload.get("rows", [])
+    summary_rows = payload.get("summary", [])
+    if not rows:
+        # no data — keep client button disabled normally, but guard here too
+        return jsonify({"ok": False, "message": "No data to download for current filters."}), 400
+
+    # ---------- Build workbook ----------
+    wb = Workbook()
+    ws1 = wb.active
+    ws1.title = "Summary"
+    ws2 = wb.create_sheet("Detailed Info")
+
+    # HEADER + META for Summary
+    if tab == "date":
+        ws1.append(["Mode", (payload.get("mode") or "").capitalize()])
+        if payload.get("mode") == "range":
+            f, t = payload.get("range") or ("", "")
+            ws1.append(["From", f])
+            ws1.append(["To", t])
+        else:
+            ws1.append(["Date", payload.get("date", "")])
+        ws1.append([])  # gap
+        ws1.append(["Sr. No.", "Employee First Name", "Employee Last Name", "Report Submitted At", "Report ID"])
+        for row in summary_rows:
+            ws1.append(row)
+
+    elif tab == "employee":
+        ws1.append(["Employee", payload.get("emp_name", "")])
+        ws1.append([])
+        ws1.append(["Sr. No.", "Date", "Site Name", "Submitted At", "Report ID"])
+        for row in summary_rows:
+            ws1.append(row)
+
+    elif tab == "sites":
+        ws1.append(["Site Name", payload.get("site", "")])
+        if payload.get("date"):
+            ws1.append(["Date Filter", payload.get("date")])
+        ws1.append([])
+        ws1.append(["Sr. No.", "Employee First Name", "Employee Last Name", "Date", "Submitted At", "Report ID"])
+        for row in summary_rows:
+            ws1.append(row)
+        ws1.append([])
+        ws1.append(["Total Area (sq km)", payload.get("total_area", 0.0)])
+
+    else:  # drones
+        ws1.append(["Drone", payload.get("drone", "")])
+        ws1.append(["Date", payload.get("date", "") or "-"])
+        ws1.append([])
+        ws1.append(["Sr. No.", "Employee First Name", "Employee Last Name", "Date", "Submitted At", "Report ID"])
+        for row in summary_rows:
+            ws1.append(row)
+        ws1.append([])
+        ws1.append(["Total Flights", payload.get("total_flights", 0)])
+        ws1.append(["Total Flight Time (min)", payload.get("total_time", 0)])
+
+    # DETAILED INFO — join reports + report_flights (+ users for names when needed)
+    ids = [r["id"] for r in rows]
+    placeholders = ",".join(["%s"] * len(ids))
+    with db_conn() as conn, conn.cursor(dictionary=True) as cur:
+        # pull reports
+        cur.execute(
+            f"SELECT r.id, r.employee_telegram_id, r.report_date, r.site_name, r.drone_name, r.pilot_name, r.copilot_name, "
+            f"r.dgps_used_json, r.dgps_operators_json, r.grid_numbers_json, r.gcp_points_json, "
+            f"r.base_height_m, r.total_area_sq_km, r.total_time_min, r.remark, r.created_at "
+            f"FROM reports r WHERE r.id IN ({placeholders})",
+            ids
+        )
+        rep_map = {row["id"]: row for row in cur.fetchall()}
+
+        # flights
+        cur.execute(
+            f"SELECT rf.report_id, rf.flight_time_min, rf.area_sq_km, rf.uav_rover_file, rf.drone_base_file_no "
+            f"FROM report_flights rf WHERE rf.report_id IN ({placeholders}) ORDER BY rf.report_id, rf.id",
+            ids
+        )
+        fl_by_rep = {}
+        for rf in cur.fetchall():
+            fl_by_rep.setdefault(rf["report_id"], []).append(rf)
+
+    # headers for ws2 (no Telegram IDs)
+    if tab == "employee":
+        ws2.append([
+            "Report ID","Date","Site Name","Drone","Pilot","Copilot",
+            "DGPS Used","DGPS Operators","Grid Numbers","GCP Points",
+            "Base Height (m)","Total Area (sq km)","Total Time (min)","Remark","Submitted At",
+            "Flight Time (min)","Flight Area (sq km)","UBX","Base File"
+        ])
+    else:
+        ws2.append([
+            "Employee First Name","Employee Last Name",
+            "Report ID","Date","Site Name","Drone","Pilot","Copilot",
+            "DGPS Used","DGPS Operators","Grid Numbers","GCP Points",
+            "Base Height (m)","Total Area (sq km)","Total Time (min)","Remark","Submitted At",
+            "Flight Time (min)","Flight Area (sq km)","UBX","Base File"
+        ])
+
+    # helper to normalize JSON lists to CSV string
+    def _csv(v):
+        try:
+            if isinstance(v, list):
+                return ", ".join([str(x) for x in v])
+            if isinstance(v, str):
+                import json as _json
+                try:
+                    parsed = _json.loads(v)
+                    if isinstance(parsed, list):
+                        return ", ".join([str(x) for x in parsed])
+                except Exception:
+                    pass
+                return v
+            return str(v) if v is not None else ""
+        except Exception:
+            return str(v) if v is not None else ""
+
+    # write detailed rows
+    for rid in ids:
+        r = rep_map.get(rid)
+        if not r:
+            continue
+        # name fields (avoid telegram id)
+        fn, ln, _ = emp_names.get(r["employee_telegram_id"], ("", "", ""))
+        # JSON stringify nicely
+        used = _csv(r["dgps_used_json"])
+        ops  = _csv(r["dgps_operators_json"])
+        grid = _csv(r["grid_numbers_json"])
+        gcp  = _csv(r["gcp_points_json"])
+
+        flights = fl_by_rep.get(rid, []) or [None]  # at least one line per report
+        for rf in flights:
+            flight_vals = (
+                (rf["flight_time_min"] if rf else ""),
+                (rf["area_sq_km"] if rf else ""),
+                (rf["uav_rover_file"] if rf else ""),
+                (rf["drone_base_file_no"] if rf else "")
+            )
+            common = [
+                r["id"], r["report_date"], r["site_name"], r["drone_name"], r["pilot_name"], r["copilot_name"],
+                used, ops, grid, gcp,
+                r["base_height_m"], r["total_area_sq_km"], r["total_time_min"], r["remark"], fmt_ist(r["created_at"])
+            ]
+            if tab == "employee":
+                ws2.append([*common, *flight_vals])
+            else:
+                ws2.append([fn, ln, *common, *flight_vals])
+
+    # stream it
+    output = io.BytesIO()
+    wb.save(output)
+    output.seek(0)
+    fname = f"view_reports_{tab}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    return send_file(output,
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                     as_attachment=True,
+                     download_name=fname)
+
+
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=9000, debug=True)
