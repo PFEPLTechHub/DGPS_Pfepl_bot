@@ -2,6 +2,7 @@ python-telegram-bot==20.7
 mysql-connector-python==9.0.0
 python-dotenv==1.0.0
 fastapi
+openpyxl
 Flask==3.0.3
 Werkzeug==3.0.3
 gunicorn==22.0.0

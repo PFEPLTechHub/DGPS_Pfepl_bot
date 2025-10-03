@@ -117,7 +117,10 @@ def get_staff_record(telegram_id):
 
 def manager_login_by_tg(telegram_id):
     with db_conn() as conn, conn.cursor(dictionary=True) as cur:
-        cur.execute("SELECT * FROM manager_logins WHERE telegram_id=%s LIMIT 1", (telegram_id,))
+        cur.execute(
+            "SELECT * FROM manager_logins WHERE telegram_id=%s ORDER BY id DESC LIMIT 1",
+            (telegram_id,),
+        )
         return cur.fetchone()
 
 def is_login_taken(login_id: str) -> bool:
@@ -325,14 +328,18 @@ def render_main_menu(telegram_id: int):
     if u["is_active"] == 1 and u["role"] in (ROLE_ADMIN, ROLE_MANAGER):
         label = "Admin" if u["role"] == ROLE_ADMIN else "Manager"
         text = f"{label} menu — choose an option:"
-        kb = InlineKeyboardMarkup(
-            [
-                [InlineKeyboardButton("⚙️ Manage Users", callback_data="mgr:panel")],
-                [InlineKeyboardButton("🧩 Masters (Sites & Drones)", callback_data="mgr:masters")],
-                [InlineKeyboardButton("ℹ️ Help", callback_data="main:help")],
-            ]
-        )
+        rows = [
+            [InlineKeyboardButton("⚙️ Manage Users", callback_data="mgr:panel")],
+            [InlineKeyboardButton("🧩 Masters (Sites & Drones)", callback_data="mgr:masters")],
+        ]
+        # Managers see Profile (admins don’t)
+        if u["role"] == ROLE_MANAGER:
+            rows.insert(1, [InlineKeyboardButton("👤 Profile", callback_data="mgr:profile")])
+
+        rows.append([InlineKeyboardButton("ℹ️ Help", callback_data="main:help")])
+        kb = InlineKeyboardMarkup(rows)
         return text, kb
+
 
     if u["is_active"] == 1 and u["role"] == ROLE_EMPLOYEE:
         text = "Employee menu — choose an option:"
@@ -616,6 +623,13 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_id = cur.lastrowid
 
         mark_invitation_used(jr["invitation_id"], user_id)
+        # === MANAGER-ONLY next steps ===
+        if jr["invite_role"] == ROLE_MANAGER:
+            await reply_text_safe(
+                update, context,
+                "Set your **Login ID** (must be unique, use letters/numbers/._-, up to 100 chars).",
+            )
+            return ASK_MGR_LOGIN
 
         await reply_text_safe(update, context, "Your records have been inserted. You can use the bot now.")
         context.user_data.clear()
@@ -624,6 +638,70 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.exception("Finalizing profile failed | jr_id=%s error=%s", jr_id, e)
         await reply_text_safe(update, context, "Something went wrong saving your profile. Please try again.")
         context.user_data.clear()
+    return ConversationHandler.END
+
+def _valid_login_id(s: str) -> bool:
+    import re
+    return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,100}", s or ""))
+
+async def ask_mgr_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Requires: is_login_taken(login_id) helper from Step 2
+    login_id = (update.message.text or "").strip()
+    if not _valid_login_id(login_id):
+        await reply_text_safe(update, context,
+                              "Invalid login. Use only letters/numbers/._- and up to 100 characters. Send again.")
+        return ASK_MGR_LOGIN
+    if is_login_taken(login_id):
+        await reply_text_safe(update, context, "That login is already taken. Send a different login ID.")
+        return ASK_MGR_LOGIN
+
+    context.user_data["mgr_login"] = login_id
+    await reply_text_safe(update, context, "Great. Now send the **Password** for this login.")
+    return ASK_MGR_PASS
+
+async def ask_mgr_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Requires: create_manager_login(login, password, telegram_id) helper from Step 2
+    pwd = (update.message.text or "").strip()
+    if not pwd:
+        await reply_text_safe(update, context, "Password cannot be empty. Send a password.")
+        return ASK_MGR_PASS
+
+    tg_id = update.effective_user.id
+    login_id = context.user_data.get("mgr_login")
+    if not login_id:
+        await reply_text_safe(update, context, "Session lost. Please start profile again.")
+        context.user_data.clear()
+        return ConversationHandler.END
+
+    try:
+        if is_login_taken(login_id):
+            await reply_text_safe(update, context, "That login was just taken. Send a different login ID.")
+            return ASK_MGR_LOGIN
+
+        create_manager_login(login_id, pwd, tg_id)
+
+    except mysql_errors.IntegrityError as e:
+        # Handle UNIQUE(login) violation (race condition)
+        if getattr(e, "errno", None) == 1062:
+            await reply_text_safe(update, context, "That login was just taken. Send a different login ID.")
+            return ASK_MGR_LOGIN
+        logger.exception("IntegrityError creating manager login | tg=%s err=%s", tg_id, e)
+        await reply_text_safe(update, context, "Could not save login. Please try again.")
+        return ASK_MGR_PASS
+
+    except Exception as e:
+        logger.exception("Creating manager login failed | tg=%s err=%s", tg_id, e)
+        await reply_text_safe(update, context, "Could not save login. Please try again.")
+        return ASK_MGR_PASS
+
+
+    await reply_text_safe(
+        update, context,
+        f"✅ Manager login created.\n\nLogin: `{login_id}`\nPassword: `{pwd}`",
+        parse_mode="Markdown"
+    )
+    context.user_data.clear()
+    await show_main_menu_message(update, context)
     return ConversationHandler.END
 
 # -------- Masters UI --------
@@ -979,6 +1057,27 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    if data == "mgr:profile":
+        u = get_user_by_tg(update.effective_user.id)
+        if not u or u["role"] != ROLE_MANAGER or u["is_active"] != 1:
+            await query.edit_message_text("Only active managers can view profile.")
+            return
+        rec = manager_login_by_tg(update.effective_user.id)  # helper from Step 2
+        if not rec:
+            await query.edit_message_text(
+                "No manager login is set yet.\nFinish your profile flow to create one.",
+                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]])
+            )
+            return
+        txt = f"👤 Your Manager Login\nLogin: `{rec['login']}`\nPassword: `{rec['password']}`"
+        await query.edit_message_text(
+            txt,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]])
+        )
+        return
+
+
     # ======= Show Users =======
     if data == "mgr:show_users":
         emps = list_employees(actor["id"], limit=25)
@@ -1208,12 +1307,16 @@ def main():
     profile_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(profile_start, pattern=r"^prof:start:\d+$")],
         states={
-            ASK_FIRST: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_first)],
-            ASK_LAST:  [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_last)],
-            ASK_PHONE: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone)],
+            ASK_FIRST:     [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_first)],
+            ASK_LAST:      [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_last)],
+            ASK_PHONE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone)],
+            # NEW states for managers:
+            ASK_MGR_LOGIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_mgr_login)],
+            ASK_MGR_PASS:  [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_mgr_pass)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
+
     app.add_handler(profile_conv)
 
     # --- Main menu callbacks (help/report/home)
