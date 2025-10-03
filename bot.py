@@ -1070,6 +1070,7 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         return
 
+    # ===== Profile (updated) =====
     if data == "mgr:profile":
         u = get_user_by_tg(update.effective_user.id)
         if not u or u["role"] != ROLE_MANAGER or u["is_active"] != 1:
@@ -1078,12 +1079,14 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         rec = manager_login_by_tg(update.effective_user.id)
         if not rec:
-            kb = InlineKeyboardMarkup([
-                [InlineKeyboardButton("➕ Create login now", callback_data="mgr:profile:create")],
-                [InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
-            ])
+            kb = InlineKeyboardMarkup(
+                [
+                    [InlineKeyboardButton("✨ Create login now", callback_data="mgr:profile:create")],
+                    [InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
+                ]
+            )
             await query.edit_message_text(
-                "No manager login is set yet.\nYou can create it now.",
+                "No manager login is set yet.\nTap below to create one.",
                 reply_markup=kb
             )
             return
@@ -1180,6 +1183,7 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             ),
         )
         return
+
 
 # -------- Main menu callbacks (help/report/home) --------
 async def main_menu_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
