@@ -3,14 +3,29 @@
 <head>
   <meta charset="utf-8">
   <title>{% block title %}Manager Dashboard{% endblock %}</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
 <body class="bg-gray-100 text-gray-900 font-sans">
   <div class="flex min-h-screen">
     {% if session.get('manager_login') %}
-    <aside class="sidebar w-64 bg-gray-900 text-white p-4 flex flex-col">
+    <!-- Mobile menu button -->
+    <button id="mobileMenuBtn" class="lg:hidden fixed top-4 left-4 z-50 p-2 bg-gray-900 text-white rounded-lg shadow-lg">
+      <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path>
+      </svg>
+    </button>
+
+    <!-- Sidebar -->
+    <aside id="sidebar" class="sidebar fixed lg:relative inset-y-0 left-0 z-40 w-64 bg-gray-900 text-white p-4 flex flex-col transform -translate-x-full lg:translate-x-0 transition-transform duration-300 ease-in-out">
+      <!-- Close button for mobile -->
+      <button id="closeSidebar" class="lg:hidden self-end p-2 text-gray-400 hover:text-white">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path>
+        </svg>
+      </button>
+      
       <div class="brand font-bold text-lg mb-4">Managers</div>
       <nav class="nav flex flex-col gap-2">
         <a class="nav-link px-3 py-2 rounded-lg hover:bg-gray-800{% if request.path.startswith('/dashboard') %} bg-gray-700{% endif %}" href="{{ url_for('dashboard') }}">Track</a>
@@ -22,9 +37,12 @@
         <a class="logout text-red-300 text-sm hover:underline" href="{{ url_for('logout') }}">Logout</a>
       </div>
     </aside>
+
+    <!-- Mobile overlay -->
+    <div id="mobileOverlay" class="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-30 hidden"></div>
     {% endif %}
 
-    <main class="content flex-1 p-6 max-w-7xl mx-auto">
+    <main class="content flex-1 p-2 sm:p-3 lg:p-6 w-full lg:max-w-7xl lg:mx-auto lg:ml-0">
       {% with messages = get_flashed_messages(with_categories=true) %}
       {% if messages %}
         <div class="flash-wrap mb-4">

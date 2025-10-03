@@ -1,32 +1,36 @@
 {% extends "base.html" %}
 {% block title %}Track — Manager Dashboard{% endblock %}
 {% block content %}
-<div class="py-6">
-  <h2 class="text-2xl font-bold text-gray-800 mb-6">Track Daily Submissions</h2>
-
-  <div class="flex gap-4 items-end mb-6">
-    <div>
-      <label for="datePicker" class="block text-sm font-medium text-gray-700">Select Date</label>
-      <input id="datePicker" type="date" value="{{ default_date }}" 
-             class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
-    </div>
-    <button id="btnRefresh" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">Refresh</button>
+<div class="py-2 sm:py-4 lg:py-6 mobile-nav w-full">
+  <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4 lg:mb-6 gap-3">
+    <h2 class="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">Track Daily Submissions</h2>
+    <button id="btnRefresh" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200 text-sm sm:text-base">Refresh</button>
   </div>
 
-  <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
-    <table class="w-full table-auto">
-      <thead>
-        <tr class="bg-blue-50 text-gray-700">
-          <th class="p-3 font-bold text-left">Sr. No.</th>
-          <th class="p-3 font-bold text-left">Employee Name</th>
-          <th class="p-3 font-bold text-left">Submission Time</th>
-          <th class="p-3 font-bold text-left">Status</th>
-        </tr>
-      </thead>
-      <tbody id="trackTableBody">
-        <!-- Rows inserted by JS -->
-      </tbody>
-    </table>
+  <div class="flex flex-col gap-2 sm:gap-3 lg:gap-4 items-end mb-3 sm:mb-4 lg:mb-6 w-full">
+    <div class="w-full">
+      <label for="datePicker" class="block text-sm font-medium text-gray-700">Select Date</label>
+      <input id="datePicker" type="date" value="{{ default_date }}" 
+             class="mt-1 p-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
+    </div>
+  </div>
+
+  <div class="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden w-full">
+    <div class="mobile-table w-full">
+      <table class="w-full table-auto">
+        <thead>
+          <tr class="bg-blue-50 text-gray-700">
+            <th class="p-2 lg:p-3 font-bold text-left text-xs sm:text-sm lg:text-base">Sr. No.</th>
+            <th class="p-2 lg:p-3 font-bold text-left text-xs sm:text-sm lg:text-base">Employee Name</th>
+            <th class="p-2 lg:p-3 font-bold text-left text-xs sm:text-sm lg:text-base">Submission Time</th>
+            <th class="p-2 lg:p-3 font-bold text-left text-xs sm:text-sm lg:text-base">Status</th>
+          </tr>
+        </thead>
+        <tbody id="trackTableBody">
+          <!-- Rows inserted by JS -->
+        </tbody>
+      </table>
+    </div>
   </div>
 </div>
 {% endblock %}

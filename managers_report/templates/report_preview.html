@@ -2,15 +2,16 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no">
   <title>Report Preview</title>
   <link href="{{ url_for('static', filename='app.css') }}" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
 </head>
-<body>
-  <div class="grid gap-6">
-    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 max-w-lg">
-      <h3 class="text-lg font-semibold text-gray-800 mb-4">Report Summary</h3>
-      <ul class="space-y-2">
+<body class="bg-gray-100">
+  <div class="grid gap-4 lg:gap-6 p-3 lg:p-6">
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-4 lg:p-6 max-w-lg">
+      <h3 class="text-base lg:text-lg font-semibold text-gray-800 mb-4">Report Summary</h3>
+      <ul class="space-y-2 text-sm lg:text-base">
         <li><span class="font-medium">Date:</span> {{ report.report_date }}</li>
         <li><span class="font-medium">Site:</span> {{ report.site_name }}</li>
         <li><span class="font-medium">Drone:</span> {{ report.drone_name }}</li>
@@ -24,39 +25,41 @@
         <li><span class="font-medium">GCP Points:</span> {{ report.gcp_points_json }}</li>
         <li><span class="font-medium">Remark:</span> {{ report.remark or '-' }}</li>
       </ul>
-      <div class="mt-4 bg-blue-50 p-4 rounded-lg">
-        <div><span class="font-medium">Total Area (sq km):</span> {{ '%.3f'|format(report.total_area_sq_km) }}</div>
-        <div><span class="font-medium">Total Time (min):</span> {{ report.total_time_min }}</div>
+      <div class="mt-4 bg-blue-50 p-3 lg:p-4 rounded-lg">
+        <div class="text-sm lg:text-base"><span class="font-medium">Total Area (sq km):</span> {{ '%.3f'|format(report.total_area_sq_km) }}</div>
+        <div class="text-sm lg:text-base"><span class="font-medium">Total Time (min):</span> {{ report.total_time_min }}</div>
       </div>
     </div>
 
-    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-6 max-w-lg">
-      <h3 class="text-lg font-semibold text-gray-800 mb-4">Flights</h3>
-      <table class="w-full table-auto">
-        <thead>
-          <tr class="bg-blue-50 text-gray-700">
-            <th class="p-3 font-bold text-left">#</th>
-            <th class="p-3 font-bold text-left">Time (min)</th>
-            <th class="p-3 font-bold text-left">Area (sq km)</th>
-            <th class="p-3 font-bold text-left">UBX</th>
-            <th class="p-3 font-bold text-left">Base File</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for f in flights %}
-          <tr class="border-b border-gray-200">
-            <td class="p-3">{{ loop.index }}</td>
-            <td class="p-3">{{ f.flight_time_min }}</td>
-            <td class="p-3">{{ '%.3f'|format(f.area_sq_km) }}</td>
-            <td class="p-3">{{ f.uav_rover_file }}</td>
-            <td class="p-3">{{ f.drone_base_file_no }}</td>
-          </tr>
-          {% endfor %}
-          {% if not flights %}
-          <tr><td colspan="5" class="p-3 text-gray-600 text-center">No flights recorded.</td></tr>
-          {% endif %}
-        </tbody>
-      </table>
+    <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-4 lg:p-6 max-w-lg">
+      <h3 class="text-base lg:text-lg font-semibold text-gray-800 mb-4">Flights</h3>
+      <div class="mobile-table">
+        <table class="w-full table-auto">
+          <thead>
+            <tr class="bg-blue-50 text-gray-700">
+              <th class="p-2 lg:p-3 font-bold text-left text-sm lg:text-base">#</th>
+              <th class="p-2 lg:p-3 font-bold text-left text-sm lg:text-base">Time (min)</th>
+              <th class="p-2 lg:p-3 font-bold text-left text-sm lg:text-base">Area (sq km)</th>
+              <th class="p-2 lg:p-3 font-bold text-left text-sm lg:text-base">UBX</th>
+              <th class="p-2 lg:p-3 font-bold text-left text-sm lg:text-base">Base File</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for f in flights %}
+            <tr class="border-b border-gray-200">
+              <td class="p-2 lg:p-3 text-sm lg:text-base">{{ loop.index }}</td>
+              <td class="p-2 lg:p-3 text-sm lg:text-base">{{ f.flight_time_min }}</td>
+              <td class="p-2 lg:p-3 text-sm lg:text-base">{{ '%.3f'|format(f.area_sq_km) }}</td>
+              <td class="p-2 lg:p-3 text-sm lg:text-base">{{ f.uav_rover_file }}</td>
+              <td class="p-2 lg:p-3 text-sm lg:text-base">{{ f.drone_base_file_no }}</td>
+            </tr>
+            {% endfor %}
+            {% if not flights %}
+            <tr><td colspan="5" class="p-2 lg:p-3 text-gray-600 text-center text-sm lg:text-base">No flights recorded.</td></tr>
+            {% endif %}
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </body>

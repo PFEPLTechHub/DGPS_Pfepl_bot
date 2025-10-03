@@ -2,71 +2,71 @@
 {% block title %}View Reports — Manager Dashboard{% endblock %}
 
 {% block content %}
-<div class="py-6">
+<div class="py-2 sm:py-4 lg:py-6 mobile-nav w-full">
   <!-- Top controls -->
-  <div class="flex items-center justify-between mb-4">
-    <h2 class="text-2xl font-bold text-gray-800">View Reports</h2>
-    <button id="vrRefreshBtn" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+  <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between mb-3 sm:mb-4 lg:mb-6 gap-3">
+    <h2 class="text-lg sm:text-xl lg:text-2xl font-bold text-gray-800">View Reports</h2>
+    <button id="vrRefreshBtn" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200 text-sm sm:text-base">
       Refresh
     </button>
   </div>
 
   <!-- Tabs -->
-  <div class="tabbar sticky top-0 z-10 bg-transparent mb-3">
-    <nav class="vr-tabs grid grid-cols-4 gap-2 p-1 rounded-xl bg-white border border-gray-200 shadow-sm">
-      <button class="vr-tab-btn active" data-tab="date">Date</button>
-      <button class="vr-tab-btn" data-tab="employee">Employee</button>
-      <button class="vr-tab-btn" data-tab="sites">Sites</button>
-      <button class="vr-tab-btn" data-tab="drones">Drones</button>
+  <div class="tabbar sticky top-0 z-10 bg-transparent mb-3 w-full">
+    <nav class="vr-tabs grid grid-cols-2 lg:grid-cols-4 gap-1 lg:gap-2 p-1 rounded-xl bg-white border border-gray-200 shadow-sm w-full">
+      <button class="vr-tab-btn active text-xs sm:text-sm lg:text-base" data-tab="date">Date</button>
+      <button class="vr-tab-btn text-xs sm:text-sm lg:text-base" data-tab="employee">Employee</button>
+      <button class="vr-tab-btn text-xs sm:text-sm lg:text-base" data-tab="sites">Sites</button>
+      <button class="vr-tab-btn text-xs sm:text-sm lg:text-base" data-tab="drones">Drones</button>
     </nav>
   </div>
 
   <!-- Panels -->
-  <div class="vr-panels space-y-6">
+  <div class="vr-panels space-y-4 sm:space-y-6 w-full">
 
     <!-- Date tab -->
-    <section id="vrTab-date" class="vr-panel">
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
-        <div class="flex flex-wrap items-end gap-4">
-          <div>
+    <section id="vrTab-date" class="vr-panel w-full">
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-2 sm:p-3 lg:p-5 space-y-3 sm:space-y-4 w-full">
+        <div class="flex flex-col gap-2 sm:gap-3 w-full">
+          <div class="w-full">
             <label class="block text-sm font-medium text-gray-700">Mode</label>
-            <select id="vrDateMode" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select id="vrDateMode" class="mt-1 p-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
               <option value="single" selected>Single Date</option>
               <option value="range">Date Range</option>
             </select>
           </div>
 
-          <div id="vrDateSingleWrap">
+          <div id="vrDateSingleWrap" class="w-full">
             <label class="block text-sm font-medium text-gray-700">Date</label>
-            <input type="date" id="vrDateSingle" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="date" id="vrDateSingle" class="mt-1 p-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
           </div>
 
-          <div id="vrDateRangeWrap" class="hidden">
-            <div class="flex items-end gap-3">
-              <div>
+          <div id="vrDateRangeWrap" class="hidden w-full">
+            <div class="flex flex-col gap-2 sm:gap-3">
+              <div class="w-full">
                 <label class="block text-sm font-medium text-gray-700">From</label>
-                <input type="date" id="vrDateFrom" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="date" id="vrDateFrom" class="mt-1 p-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
               </div>
-              <div>
+              <div class="w-full">
                 <label class="block text-sm font-medium text-gray-700">To</label>
-                <input type="date" id="vrDateTo" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="date" id="vrDateTo" class="mt-1 p-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
               </div>
             </div>
           </div>
 
-          <button id="vrDateFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          <button id="vrDateFilter" class="w-full py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200 mobile-btn">
             Apply
           </button>
         </div>
 
-        <div class="overflow-auto border border-gray-200 rounded-xl">
+        <div class="mobile-table border border-gray-200 rounded-xl">
           <table class="w-full table-auto">
             <thead>
               <tr class="bg-blue-50 text-gray-700">
-                <th class="p-3 text-left font-bold">Sr. No.</th>
-                <th class="p-3 text-left font-bold">Employee First Name</th>
-                <th class="p-3 text-left font-bold">Employee Last Name</th>
-                <th class="p-3 text-left font-bold">Report Preview</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Sr. No.</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Employee First Name</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Employee Last Name</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Report Preview</th>
               </tr>
             </thead>
             <tbody id="vrDateTbody"></tbody>
@@ -75,7 +75,7 @@
 
         <div class="flex justify-end">
           <button id="vrDateDownload"
-                  class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900 opacity-50 cursor-not-allowed"
+                  class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900 opacity-50 cursor-not-allowed mobile-btn"
                   disabled>
             Download
           </button>
@@ -86,31 +86,31 @@
 
     <!-- Employee tab -->
     <section id="vrTab-employee" class="vr-panel hidden">
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
-        <div class="flex flex-wrap items-end gap-4">
-          <div>
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-3 lg:p-5 space-y-4">
+        <div class="flex flex-col lg:flex-row lg:flex-wrap items-end gap-3 lg:gap-4">
+          <div class="w-full lg:w-auto">
             <label class="block text-sm font-medium text-gray-700">Employee</label>
-            <select id="vrEmpSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select id="vrEmpSelect" class="mt-1 p-2 w-full lg:min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
               <option value="">-- Select Employee --</option>
               {% for e in employees %}
                 <option value="{{ e.telegram_id }}">{{ e.name }}</option>
               {% endfor %}
             </select>
           </div>
-          <button id="vrEmpFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          <button id="vrEmpFilter" class="w-full lg:w-auto py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200 mobile-btn">
             Apply
           </button>
         </div>
 
-        <div class="overflow-auto border border-gray-200 rounded-xl">
+        <div class="mobile-table border border-gray-200 rounded-xl">
           <table class="w-full table-auto">
             <thead>
               <tr class="bg-blue-50 text-gray-700">
-                <th class="p-3 text-left font-bold">Sr. No.</th>
-                <th class="p-3 text-left font-bold">Date</th>
-                <th class="p-3 text-left font-bold">Site Name</th>
-                <th class="p-3 text-left font-bold">Submitted At</th>
-                <th class="p-3 text-left font-bold">Report Preview</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Sr. No.</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Date</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Site Name</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Submitted At</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Report Preview</th>
               </tr>
             </thead>
             <tbody id="vrEmpTbody"></tbody>
@@ -119,7 +119,7 @@
 
         <div class="flex justify-end">
           <button id="vrEmpDownload"
-                  class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900 opacity-50 cursor-not-allowed"
+                  class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900 opacity-50 cursor-not-allowed mobile-btn"
                   disabled>
             Download
           </button>
@@ -130,48 +130,48 @@
 
     <!-- Sites tab -->
     <section id="vrTab-sites" class="vr-panel hidden">
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
-        <div class="flex flex-wrap items-end gap-4">
-          <div>
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-3 lg:p-5 space-y-4">
+        <div class="flex flex-col lg:flex-row lg:flex-wrap items-end gap-3 lg:gap-4">
+          <div class="w-full lg:w-auto">
             <label class="block text-sm font-medium text-gray-700">Site</label>
-            <select id="vrSiteSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select id="vrSiteSelect" class="mt-1 p-2 w-full lg:min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
               <option value="">-- Select Site --</option>
               {% for s in sites %}
                 <option value="{{ s.name }}">{{ s.name }}</option>
               {% endfor %}
             </select>
           </div>
-          <div>
+          <div class="w-full lg:w-auto">
             <label class="block text-sm font-medium text-gray-700">Date (optional)</label>
-            <input type="date" id="vrSiteDate" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="date" id="vrSiteDate" class="mt-1 p-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
           </div>
-          <button id="vrSiteFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          <button id="vrSiteFilter" class="w-full lg:w-auto py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200 mobile-btn">
             Apply
           </button>
         </div>
 
-        <div class="overflow-auto border border-gray-200 rounded-xl">
+        <div class="mobile-table border border-gray-200 rounded-xl">
           <table class="w-full table-auto">
             <thead>
               <tr class="bg-blue-50 text-gray-700">
-                <th class="p-3 text-left font-bold">Sr. No.</th>
-                <th class="p-3 text-left font-bold">Employee First Name</th>
-                <th class="p-3 text-left font-bold">Employee Last Name</th>
-                <th class="p-3 text-left font-bold">Date</th>
-                <th class="p-3 text-left font-bold">Report Preview</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Sr. No.</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Employee First Name</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Employee Last Name</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Date</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Report Preview</th>
               </tr>
             </thead>
             <tbody id="vrSiteTbody"></tbody>
           </table>
         </div>
 
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div class="text-sm text-gray-700">
             <span class="font-medium">Total Area (sq km):</span>
             <span id="vrSiteTotalArea">0.000</span>
           </div>
           <button id="vrSiteDownload"
-                  class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900 opacity-50 cursor-not-allowed"
+                  class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900 opacity-50 cursor-not-allowed mobile-btn"
                   disabled>
             Download
           </button>
@@ -182,48 +182,48 @@
 
     <!-- Drones tab -->
     <section id="vrTab-drones" class="vr-panel hidden">
-      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-5 space-y-4">
-        <div class="flex flex-wrap items-end gap-4">
-          <div>
+      <div class="bg-white border border-gray-200 rounded-xl shadow-sm p-3 lg:p-5 space-y-4">
+        <div class="flex flex-col lg:flex-row lg:flex-wrap items-end gap-3 lg:gap-4">
+          <div class="w-full lg:w-auto">
             <label class="block text-sm font-medium text-gray-700">Drone</label>
-            <select id="vrDroneSelect" class="mt-1 p-2 min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <select id="vrDroneSelect" class="mt-1 p-2 w-full lg:min-w-[260px] border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
               <option value="">-- Select Drone --</option>
               {% for d in drones %}
                 <option value="{{ d.name }}">{{ d.name }}</option>
               {% endfor %}
             </select>
           </div>
-          <div>
+          <div class="w-full lg:w-auto">
             <label class="block text-sm font-medium text-gray-700">Date (optional)</label>
-            <input type="date" id="vrDroneDate" class="mt-1 p-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="date" id="vrDroneDate" class="mt-1 p-2 w-full border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 mobile-btn">
           </div>
-          <button id="vrDroneFilter" class="py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200">
+          <button id="vrDroneFilter" class="w-full lg:w-auto py-2 px-4 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-semibold transition duration-200 mobile-btn">
             Apply
           </button>
         </div>
 
-        <div class="overflow-auto border border-gray-200 rounded-xl">
+        <div class="mobile-table border border-gray-200 rounded-xl">
           <table class="w-full table-auto">
             <thead>
               <tr class="bg-blue-50 text-gray-700">
-                <th class="p-3 text-left font-bold">Sr. No.</th>
-                <th class="p-3 text-left font-bold">Employee First Name</th>
-                <th class="p-3 text-left font-bold">Employee Last Name</th>
-                <th class="p-3 text-left font-bold">Date</th>
-                <th class="p-3 text-left font-bold">Report Preview</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Sr. No.</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Employee First Name</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Employee Last Name</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Date</th>
+                <th class="p-2 lg:p-3 text-left font-bold text-sm lg:text-base">Report Preview</th>
               </tr>
             </thead>
             <tbody id="vrDroneTbody"></tbody>
           </table>
         </div>
 
-        <div class="flex items-center justify-between">
+        <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <div class="text-sm text-gray-700">
             <span class="font-medium">Total Flights:</span>
             <span id="vrDroneTotalFlights">0</span>
           </div>
           <button id="vrDroneDownload"
-                  class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900 opacity-50 cursor-not-allowed"
+                  class="py-2 px-4 bg-gray-800 text-white rounded-lg hover:bg-gray-900 opacity-50 cursor-not-allowed mobile-btn"
                   disabled>
             Download
           </button>
@@ -235,25 +235,23 @@
   </div>
 </div>
 
-<!-- Preview Modal (SCROLLABLE) -->
+<!-- Preview Modal (MOBILE-FRIENDLY) -->
 <div id="viewModal" class="fixed inset-0 z-50 hidden" aria-modal="true" role="dialog">
   <!-- Backdrop -->
   <div class="absolute inset-0 bg-black/40"></div>
 
   <!-- Panel -->
-  <div
-    class="relative z-10 mx-auto max-w-3xl w-[92%] bg-white rounded-xl shadow-xl flex flex-col"
-    style="height:90vh; min-height:0;"
-  >
+  <div class="relative z-10 mx-auto max-w-3xl w-[95%] lg:w-[92%] bg-white rounded-xl shadow-xl flex flex-col mobile-modal"
+       style="height:90vh; min-height:0; margin: 1rem; max-height: calc(100vh - 2rem);">
     <!-- Header -->
-    <div class="flex items-center justify-between border-b border-gray-200 px-5 py-3">
-      <h3 class="text-lg font-semibold text-gray-800">Report Preview</h3>
-      <button class="px-3 py-1 rounded-md bg-gray-200 hover:bg-gray-300" onclick="document.getElementById('viewModal').classList.add('hidden')">
+    <div class="flex items-center justify-between border-b border-gray-200 px-3 lg:px-5 py-3">
+      <h3 class="text-base lg:text-lg font-semibold text-gray-800">Report Preview</h3>
+      <button class="px-3 py-1 rounded-md bg-gray-200 hover:bg-gray-300 mobile-btn" onclick="document.getElementById('viewModal').classList.add('hidden')">
         Close
       </button>
     </div>
     <!-- Body (scroll container) -->
-    <div id="viewModalContent" class="flex-1 overflow-y-auto p-4" style="min-height:0;"></div>
+    <div id="viewModalContent" class="flex-1 overflow-y-auto p-3 lg:p-4" style="min-height:0;"></div>
   </div>
 </div>
 {% endblock %}

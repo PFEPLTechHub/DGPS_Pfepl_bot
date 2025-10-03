@@ -249,8 +249,49 @@ MGR.deleteFlightRow = function(button) {
   }
 };
 
+// -------------------- Mobile Menu --------------------
+MGR.initMobileMenu = function() {
+  const mobileMenuBtn = document.getElementById('mobileMenuBtn');
+  const sidebar = document.getElementById('sidebar');
+  const closeSidebar = document.getElementById('closeSidebar');
+  const mobileOverlay = document.getElementById('mobileOverlay');
+
+  if (!mobileMenuBtn || !sidebar) return;
+
+  function openSidebar() {
+    sidebar.classList.remove('-translate-x-full');
+    mobileOverlay?.classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function closeSidebarMenu() {
+    sidebar.classList.add('-translate-x-full');
+    mobileOverlay?.classList.add('hidden');
+    document.body.style.overflow = '';
+  }
+
+  mobileMenuBtn.addEventListener('click', openSidebar);
+  closeSidebar?.addEventListener('click', closeSidebarMenu);
+  mobileOverlay?.addEventListener('click', closeSidebarMenu);
+
+  // Close sidebar when clicking on nav links
+  document.querySelectorAll('.nav-link').forEach(link => {
+    link.addEventListener('click', closeSidebarMenu);
+  });
+
+  // Close sidebar on escape key
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && !sidebar.classList.contains('-translate-x-full')) {
+      closeSidebarMenu();
+    }
+  });
+};
+
 // -------------------- Page Bootstrap (dashboard) --------------------
 document.addEventListener('DOMContentLoaded', () => {
+  // Initialize mobile menu
+  MGR.initMobileMenu();
+
   const btnRefresh = document.getElementById('btnRefresh');
   const datePicker = document.getElementById('datePicker');
   const btnFilter  = document.getElementById('btnFilter');
