@@ -1184,6 +1184,34 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+async def profile_create_from_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry when manager taps 'Create login now' in Profile screen."""
+    query = update.callback_query
+    await query.answer()
+
+    tg_id = update.effective_user.id
+    # Must be an active manager
+    if not is_manager(tg_id):
+        await query.edit_message_text("Only active managers can do this.")
+        return ConversationHandler.END
+
+    # If they already have a login, just show it
+    rec = manager_login_by_tg(tg_id)
+    if rec:
+        txt = f"👤 Your Manager Login\nLogin: `{rec['login']}`\nPassword: `{rec['password']}`"
+        await query.edit_message_text(
+            txt,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]])
+        )
+        return ConversationHandler.END
+
+    # Otherwise start the same Login/Password flow used after approval
+    await query.edit_message_text(
+        "Set your **Login ID** (must be unique, use letters/numbers/._-, up to 100 chars).",
+        parse_mode="Markdown"
+    )
+    return ASK_MGR_LOGIN
 
 # -------- Main menu callbacks (help/report/home) --------
 async def main_menu_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1319,7 +1347,8 @@ def main():
     ))
 
     # --- Staff panel + invites + pending + users
-    app.add_handler(CallbackQueryHandler(manager_buttons, pattern=r"^mgr:(?!masters)"))
+    #app.add_handler(CallbackQueryHandler(manager_buttons, pattern=r"^mgr:(?!masters)"))
+    app.add_handler(CallbackQueryHandler(manager_buttons, pattern=r"^mgr:(?!masters|profile:create)"))
 
     # --- Join request approve/reject
     app.add_handler(CallbackQueryHandler(join_request_callback, pattern=r"^jr:(approve|reject):\d+$"))
