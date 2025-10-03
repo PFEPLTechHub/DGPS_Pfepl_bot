@@ -1,4 +1,4 @@
-# bot.py
+# app.py
 import os
 import re
 import uuid
@@ -74,7 +74,7 @@ ROLE_EMPLOYEE = 2
 
 # Conversation states
 ASK_FIRST, ASK_LAST, ASK_PHONE = range(3)
-ASK_MGR_LOGIN, ASK_MGR_PASS = range(3, 5)  # <-- NEW (3,4)
+ASK_MGR_LOGIN, ASK_MGR_PASS = range(3, 5)  # (3,4)
 
 # Masters text-entry states
 MASTERS_ADD_NAME, MASTERS_RENAME_NAME = range(100, 102)
@@ -286,7 +286,6 @@ def masters_delete(kind: str, rec_id: int):
             cur.execute(f"DELETE FROM {table} WHERE id=%s", (rec_id,))
             return True, None
         except mysql_errors.IntegrityError as e:
-            # In use by reports (FK restriction)
             return False, e
 
 # ----------------- Network-safe sending helpers -----------------
@@ -339,7 +338,6 @@ def render_main_menu(telegram_id: int):
         rows.append([InlineKeyboardButton("ℹ️ Help", callback_data="main:help")])
         kb = InlineKeyboardMarkup(rows)
         return text, kb
-
 
     if u["is_active"] == 1 and u["role"] == ROLE_EMPLOYEE:
         text = "Employee menu — choose an option:"
@@ -623,11 +621,13 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 user_id = cur.lastrowid
 
         mark_invitation_used(jr["invitation_id"], user_id)
+
         # === MANAGER-ONLY next steps ===
         if jr["invite_role"] == ROLE_MANAGER:
             await reply_text_safe(
                 update, context,
                 "Set your **Login ID** (must be unique, use letters/numbers/._-, up to 100 chars).",
+                parse_mode="Markdown"
             )
             return ASK_MGR_LOGIN
 
@@ -645,7 +645,6 @@ def _valid_login_id(s: str) -> bool:
     return bool(re.fullmatch(r"[A-Za-z0-9._-]{1,100}", s or ""))
 
 async def ask_mgr_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Requires: is_login_taken(login_id) helper from Step 2
     login_id = (update.message.text or "").strip()
     if not _valid_login_id(login_id):
         await reply_text_safe(update, context,
@@ -656,11 +655,10 @@ async def ask_mgr_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ASK_MGR_LOGIN
 
     context.user_data["mgr_login"] = login_id
-    await reply_text_safe(update, context, "Great. Now send the **Password** for this login.")
+    await reply_text_safe(update, context, "Great. Now send the **Password** for this login.", parse_mode="Markdown")
     return ASK_MGR_PASS
 
 async def ask_mgr_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Requires: create_manager_login(login, password, telegram_id) helper from Step 2
     pwd = (update.message.text or "").strip()
     if not pwd:
         await reply_text_safe(update, context, "Password cannot be empty. Send a password.")
@@ -694,7 +692,6 @@ async def ask_mgr_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_text_safe(update, context, "Could not save login. Please try again.")
         return ASK_MGR_PASS
 
-
     await reply_text_safe(
         update, context,
         f"✅ Manager login created.\n\nLogin: `{login_id}`\nPassword: `{pwd}`",
@@ -703,6 +700,33 @@ async def ask_mgr_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
     await show_main_menu_message(update, context)
     return ConversationHandler.END
+
+# -------- allow creating credentials from Profile --------
+async def profile_create_from_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    u = get_user_by_tg(update.effective_user.id)
+    if not (u and u["is_active"] == 1 and u["role"] == ROLE_MANAGER):
+        await query.edit_message_text("Only active managers can create a login.")
+        return ConversationHandler.END
+
+    # If already present, show and exit
+    rec = manager_login_by_tg(update.effective_user.id)
+    if rec:
+        txt = f"👤 Your Manager Login\nLogin: `{rec['login']}`\nPassword: `{rec['password']}`"
+        await query.edit_message_text(
+            txt,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]])
+        )
+        return ConversationHandler.END
+
+    await query.edit_message_text(
+        "Set your **Login ID** (must be unique, use letters/numbers/._-, up to 100 chars).",
+        parse_mode="Markdown"
+    )
+    return ASK_MGR_LOGIN
 
 # -------- Masters UI --------
 def masters_root_kb():
@@ -731,7 +755,6 @@ def masters_list_back_kb(kind: str):
     return InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data=f"masters:pick:{kind}")]])
 
 def masters_items_kb(kind: str, action: str):
-    """Build a keyboard listing items for rename/toggle/delete."""
     items = masters_list(kind)
     rows = []
     if not items:
@@ -753,7 +776,6 @@ def masters_items_kb(kind: str, action: str):
     return InlineKeyboardMarkup(rows)
 
 async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """All inline flows for masters (except add/rename text entry which is in a conversation)."""
     query = update.callback_query
     await query.answer()
     if not has_staff_privileges(update.effective_user.id):
@@ -771,7 +793,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"Manage {_label_for(kind)}s:", reply_markup=masters_kind_menu_kb(kind))
         return
 
-    # List (clean — no #id, only Back)
     if data.startswith("masters:list:"):
         _, _, kind = data.split(":")
         items = masters_list(kind)
@@ -783,7 +804,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(txt or "No items.", reply_markup=masters_list_back_kb(kind))
         return
 
-    # Add → ask for name (conversation starts; handled by ConversationHandler entry points)
     if data.startswith("masters:add:"):
         _, _, kind = data.split(":")
         context.user_data["masters_kind"] = kind
@@ -791,7 +811,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"Send the new {_label_for(kind)} name.")
         return MASTERS_ADD_NAME
 
-    # Rename → choose item list
     if data.startswith("masters:rename:list:"):
         _, _, _, kind = data.split(":")
         await query.edit_message_text(
@@ -800,7 +819,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Rename → picked item, ask for new name (conversation)
     if data.startswith("masters:rename:"):
         _, _, kind, id_str = data.split(":")
         context.user_data["masters_kind"] = kind
@@ -809,7 +827,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(f"Send the new name for this {_label_for(kind)}.")
         return MASTERS_RENAME_NAME
 
-    # Toggle → choose item list
     if data.startswith("masters:toggle:list:"):
         _, _, _, kind = data.split(":")
         await query.edit_message_text(
@@ -818,7 +835,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Toggle → flip and show result
     if data.startswith("masters:toggle:"):
         _, _, kind, id_str = data.split(":")
         ok, new_val = masters_toggle(kind, int(id_str))
@@ -827,7 +843,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(msg, reply_markup=masters_kind_menu_kb(kind))
         return
 
-    # Delete → choose item list
     if data.startswith("masters:delete:list:"):
         _, _, _, kind = data.split(":")
         await query.edit_message_text(
@@ -836,7 +851,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # Delete → confirm
     if data.startswith("masters:delask:"):
         _, _, kind, id_str = data.split(":")
         kb = InlineKeyboardMarkup(
@@ -848,7 +862,6 @@ async def masters_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("Are you sure you want to delete this item?", reply_markup=kb)
         return
 
-    # Delete → perform
     if data.startswith("masters:del:"):
         _, _, kind, id_str = data.split(":")
         ok, err = masters_delete(kind, int(id_str))
@@ -1062,13 +1075,19 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not u or u["role"] != ROLE_MANAGER or u["is_active"] != 1:
             await query.edit_message_text("Only active managers can view profile.")
             return
-        rec = manager_login_by_tg(update.effective_user.id)  # helper from Step 2
+
+        rec = manager_login_by_tg(update.effective_user.id)
         if not rec:
+            kb = InlineKeyboardMarkup([
+                [InlineKeyboardButton("➕ Create login now", callback_data="mgr:profile:create")],
+                [InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
+            ])
             await query.edit_message_text(
-                "No manager login is set yet.\nFinish your profile flow to create one.",
-                reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]])
+                "No manager login is set yet.\nYou can create it now.",
+                reply_markup=kb
             )
             return
+
         txt = f"👤 Your Manager Login\nLogin: `{rec['login']}`\nPassword: `{rec['password']}`"
         await query.edit_message_text(
             txt,
@@ -1076,7 +1095,6 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]])
         )
         return
-
 
     # ======= Show Users =======
     if data == "mgr:show_users":
@@ -1197,7 +1215,6 @@ async def main_menu_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     if data == "emp:report":
-        # Only active employees get the WebApp button
         u = get_user_by_tg(update.effective_user.id)
         if not (u and u["is_active"] == 1 and u["role"] == ROLE_EMPLOYEE):
             await query.edit_message_text("Only active employees can submit reports.",
@@ -1303,20 +1320,21 @@ def main():
     # --- Join request approve/reject
     app.add_handler(CallbackQueryHandler(join_request_callback, pattern=r"^jr:(approve|reject):\d+$"))
 
-    # --- Profile flow
+    # --- Profile flow (invite path and profile path)
     profile_conv = ConversationHandler(
-        entry_points=[CallbackQueryHandler(profile_start, pattern=r"^prof:start:\d+$")],
+        entry_points=[
+            CallbackQueryHandler(profile_start, pattern=r"^prof:start:\d+$"),
+            CallbackQueryHandler(profile_create_from_profile, pattern=r"^mgr:profile:create$"),
+        ],
         states={
             ASK_FIRST:     [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_first)],
             ASK_LAST:      [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_last)],
             ASK_PHONE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_phone)],
-            # NEW states for managers:
             ASK_MGR_LOGIN: [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_mgr_login)],
             ASK_MGR_PASS:  [MessageHandler(filters.TEXT & ~filters.COMMAND, ask_mgr_pass)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-
     app.add_handler(profile_conv)
 
     # --- Main menu callbacks (help/report/home)
