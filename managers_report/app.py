@@ -11,6 +11,8 @@ from flask import (
 import mysql.connector
 from mysql.connector import pooling
 import json
+import io
+from openpyxl import Workbook
 
 # ----------------- Config -----------------
 load_dotenv()
