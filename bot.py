@@ -509,19 +509,21 @@ async def join_request_callback(update: Update, context: ContextTypes.DEFAULT_TY
 
     if action == "approve":
         update_join_request_status(jr_id, "approved", decided_by=actor["id"])
+        
+        # For both managers and employees, use the same profile flow
         kb = InlineKeyboardMarkup([[InlineKeyboardButton("🧾 Start Profile", callback_data=f"prof:start:{jr_id}")]])
+        role_text = "manager" if jr["invite_role"] == ROLE_MANAGER else "employee"
         try:
             await safe_send_message(
                 context.bot,
                 chat_id=jr["telegram_id"],
-                text="Your request has been approved. Please complete your profile to finish joining.",
+                text=f"Your {role_text} request has been approved. Please complete your profile to finish joining.",
                 reply_markup=kb,
             )
         except Exception:
             pass
-
         await query.edit_message_text(
-            "Approved. The user has been asked to complete their profile.",
+            f"{role_text.capitalize()} approved. They will be asked to complete their profile.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Manager Panel", callback_data="mgr:panel")]]),
         )
     else:
@@ -626,8 +628,7 @@ async def ask_phone(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if jr["invite_role"] == ROLE_MANAGER:
             await reply_text_safe(
                 update, context,
-                "Set your **Login ID** (must be unique, use letters/numbers/._-, up to 100 chars).",
-                parse_mode="Markdown"
+                "Profile information saved! Now set your Login ID (must be unique, use letters/numbers/._-, up to 100 chars):"
             )
             return ASK_MGR_LOGIN
 
@@ -646,22 +647,26 @@ def _valid_login_id(s: str) -> bool:
 
 async def ask_mgr_login(update: Update, context: ContextTypes.DEFAULT_TYPE):
     login_id = (update.message.text or "").strip()
+    if not login_id:
+        await reply_text_safe(update, context, "❌ Login ID cannot be empty. Please send a valid login ID.")
+        return ASK_MGR_LOGIN
     if not _valid_login_id(login_id):
         await reply_text_safe(update, context,
-                              "Invalid login. Use only letters/numbers/._- and up to 100 characters. Send again.")
+                              "❌ Invalid login ID format.\n\nValid characters: letters, numbers, dot (.), underscore (_), hyphen (-)\nMaximum length: 100 characters\n\nPlease send a valid login ID:")
         return ASK_MGR_LOGIN
     if is_login_taken(login_id):
-        await reply_text_safe(update, context, "That login is already taken. Send a different login ID.")
+        await reply_text_safe(update, context, "❌ That login ID is already taken by another manager. Please choose a different one.")
         return ASK_MGR_LOGIN
 
     context.user_data["mgr_login"] = login_id
-    await reply_text_safe(update, context, "Great. Now send the **Password** for this login.", parse_mode="Markdown")
+    await reply_text_safe(update, context, 
+                          "✅ Login ID accepted!\n\nStep 2: Set your Password\n\nPassword requirements:\n• Cannot be empty\n• Choose a secure password\n\nSend your password now:")
     return ASK_MGR_PASS
 
 async def ask_mgr_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
     pwd = (update.message.text or "").strip()
     if not pwd:
-        await reply_text_safe(update, context, "Password cannot be empty. Send a password.")
+        await reply_text_safe(update, context, "❌ Password cannot be empty. Please send a password.")
         return ASK_MGR_PASS
 
     tg_id = update.effective_user.id
@@ -692,10 +697,44 @@ async def ask_mgr_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await reply_text_safe(update, context, "Could not save login. Please try again.")
         return ASK_MGR_PASS
 
+    # Check if this is part of a new manager profile creation flow
+    jr_id = context.user_data.get("profile_jr_id")
+    if jr_id:
+        # This is a new manager going through the approval process
+        jr = get_join_request(jr_id)
+        if jr and jr["status"] == "approved" and jr["invite_role"] == ROLE_MANAGER:
+            # User record was already created in ask_phone, just mark invitation as used
+            try:
+                with db_conn() as conn, conn.cursor() as cur:
+                    cur.execute("SELECT id FROM users WHERE telegram_id=%s", (jr["telegram_id"],))
+                    row = cur.fetchone()
+                    if row:
+                        user_id = row[0]
+                        mark_invitation_used(jr["invitation_id"], user_id)
+                        
+                        await reply_text_safe(
+                            update, context,
+                            f"✅ Manager profile completed successfully!\n\nYour login credentials:\nLogin: {login_id}\nPassword: {pwd}\n\nYou can now use the bot."
+                        )
+                        context.user_data.clear()
+                        await show_main_menu_message(update, context)
+                        return ConversationHandler.END
+                    else:
+                        # This shouldn't happen, but handle gracefully
+                        await reply_text_safe(update, context, "Error: User record not found. Please contact support.")
+                        context.user_data.clear()
+                        return ConversationHandler.END
+                
+            except Exception as e:
+                logger.exception("Finalizing manager login failed | jr_id=%s error=%s", jr_id, e)
+                await reply_text_safe(update, context, "Something went wrong saving your login. Please try again.")
+                context.user_data.clear()
+                return ConversationHandler.END
+
+    # This is an existing manager creating login from profile menu
     await reply_text_safe(
         update, context,
-        f"✅ Manager login created.\n\nLogin: `{login_id}`\nPassword: `{pwd}`",
-        parse_mode="Markdown"
+        f"✅ Manager login created.\n\nLogin: {login_id}\nPassword: {pwd}"
     )
     context.user_data.clear()
     await show_main_menu_message(update, context)
@@ -1081,17 +1120,18 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not rec:
             kb = InlineKeyboardMarkup(
                 [
-                    [InlineKeyboardButton("✨ Create login now", callback_data="mgr:profile:create")],
+                    [InlineKeyboardButton("🔑 Create Login Credentials", callback_data="mgr:profile:create")],
                     [InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")],
                 ]
             )
             await query.edit_message_text(
-                "No manager login is set yet.\nTap below to create one.",
-                reply_markup=kb
+                "**Manager Profile Setup**\n\nYou need to create login credentials to access the system.\n\nTap below to set up your login ID and password.",
+                reply_markup=kb,
+                parse_mode="Markdown"
             )
             return
 
-        txt = f"👤 Your Manager Login\nLogin: `{rec['login']}`\nPassword: `{rec['password']}`"
+        txt = f"**👤 Your Manager Login Credentials**\n\n**Login:** `{rec['login']}`\n**Password:** `{rec['password']}`\n\n_Keep these credentials safe!_"
         await query.edit_message_text(
             txt,
             parse_mode="Markdown",
@@ -1185,33 +1225,45 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
 async def profile_create_from_profile(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry when manager taps 'Create login now' in Profile screen."""
+    """
+    Callback when a manager taps: ✨ Create login now
+    Starts the ASK_MGR_LOGIN -> ASK_MGR_PASS conversation steps.
+    """
     query = update.callback_query
     await query.answer()
 
-    tg_id = update.effective_user.id
-    # Must be an active manager
-    if not is_manager(tg_id):
-        await query.edit_message_text("Only active managers can do this.")
+    # Only active managers can create a manager login
+    u = get_user_by_tg(update.effective_user.id)
+    if not u or u["role"] != ROLE_MANAGER or u["is_active"] != 1:
+        await query.edit_message_text("Only active managers can create a manager login.")
         return ConversationHandler.END
 
-    # If they already have a login, just show it
-    rec = manager_login_by_tg(tg_id)
+    # If already present, show existing credentials and exit
+    rec = manager_login_by_tg(update.effective_user.id)
     if rec:
-        txt = f"👤 Your Manager Login\nLogin: `{rec['login']}`\nPassword: `{rec['password']}`"
         await query.edit_message_text(
-            txt,
+            f"👤 Your Manager Login\nLogin: `{rec['login']}`\nPassword: `{rec['password']}`",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]])
         )
         return ConversationHandler.END
 
-    # Otherwise start the same Login/Password flow used after approval
+    # Start the login creation flow
     await query.edit_message_text(
-        "Set your **Login ID** (must be unique, use letters/numbers/._-, up to 100 chars).",
-        parse_mode="Markdown"
+        "🔑 Create Manager Login Credentials\n\n"
+        "Step 1: Set your Login ID\n\n"
+        "Rules:\n"
+        "• Must be unique across all managers\n"
+        "• Only letters, numbers, dot (.), underscore (_), or hyphen (-)\n"
+        "• Maximum length: 100 characters\n"
+        "• Cannot be empty\n\n"
+        "Send your desired Login ID now:"
     )
+
+    # mark that we came via Profile
+    context.user_data["mgr_create_source"] = "profile_button"
     return ASK_MGR_LOGIN
+
 
 # -------- Main menu callbacks (help/report/home) --------
 async def main_menu_callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
