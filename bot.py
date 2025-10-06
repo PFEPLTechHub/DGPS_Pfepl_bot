@@ -331,9 +331,10 @@ def render_main_menu(telegram_id: int):
             [InlineKeyboardButton("⚙️ Manage Users", callback_data="mgr:panel")],
             [InlineKeyboardButton("🧩 Masters (Sites & Drones)", callback_data="mgr:masters")],
         ]
-        # Managers see Profile (admins don’t)
+        # Managers see Profile and Dashboard (admins don't)
         if u["role"] == ROLE_MANAGER:
             rows.insert(1, [InlineKeyboardButton("👤 Profile", callback_data="mgr:profile")])
+            rows.insert(2, [InlineKeyboardButton("📊 Dashboard", callback_data="mgr:dashboard")])
 
         rows.append([InlineKeyboardButton("ℹ️ Help", callback_data="main:help")])
         kb = InlineKeyboardMarkup(rows)
@@ -1136,6 +1137,22 @@ async def manager_buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             txt,
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back", callback_data="mgr:panel")]])
+        )
+        return
+
+    # ===== Dashboard =====
+    if data == "mgr:dashboard":
+        u = get_user_by_tg(update.effective_user.id)
+        if not u or u["role"] != ROLE_MANAGER or u["is_active"] != 1:
+            await query.edit_message_text("Only active managers can access the dashboard.")
+            return
+
+        dashboard_url = "https://evelynn-paleogenetic-bentlee.ngrok-free.dev/"
+        txt = f"📊 **Manager Dashboard**\n\nAccess your dashboard here:\n\n`{dashboard_url}`\n\nYou can copy this link and open it in your browser."
+        await query.edit_message_text(
+            txt,
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("⬅️ Back to Menu", callback_data="main:menu")]])
         )
         return
 
